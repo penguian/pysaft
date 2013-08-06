@@ -112,12 +112,12 @@ def build_stationary_spectrum(alpha, omega, arr, word_len, tol=1.0e-10):
             spectrum[markov_state, spectrum_col] = state_prob
     return np.reshape(spectrum, (-1, alpha))
  
-def build_frequency_array(alphabet, seq, omega):
+def build_frequency_array(alphabet, seq, word_len):
     alpha_dict = dict(zip(alphabet,range(len(alphabet))))
     alpha = len(alphabet)
+    omega = word_len - 1
     result = np.zeros((alpha ** omega, alpha))
     str_len = len(seq)
-    word_len = omega + 1
     pos = restart_pos(alphabet, seq, word_len, 0)
     end_pos = pos + omega
     while (0 <= pos) and (end_pos < str_len):
@@ -175,31 +175,31 @@ def print_array_as_mmc(arr, description):
         for row in xrange(nbr_rows):
             print row + 1, col + 1, arr[row, col]
 
-def print_seq_normalized_frequency_array(alphabet, seq, omega, description, 
+def print_seq_normalized_frequency_array(alphabet, seq, word_len, description, 
                                          normalize_array_func, print_array_func):
-    arr = build_frequency_array(alphabet, seq, omega)
+    arr = build_frequency_array(alphabet, seq, word_len)
     mat = normalize_array_func(arr)
     print_array_func(mat, description)
 
 def print_seq_markov_array_as_is(alphabet, seq, omega, description):
-    print_seq_normalized_frequency_array(alphabet, seq, omega, description, 
+    print_seq_normalized_frequency_array(alphabet, seq, omega + 1, description, 
                                          normalize_array_as_markov, print_array_as_is)
 
 def print_seq_markov_array_as_mma(alphabet, seq, omega, description):
-    print_seq_normalized_frequency_array(alphabet, seq, omega, description, 
+    print_seq_normalized_frequency_array(alphabet, seq, omega + 1, description, 
                                          normalize_array_as_markov, print_array_as_mma)
 
 def print_seq_markov_array_as_mmc(alphabet, seq, omega, description):
-    print_seq_normalized_frequency_array(alphabet, seq, omega, description, 
+    print_seq_normalized_frequency_array(alphabet, seq, omega + 1, description, 
                                          normalize_array_as_markov, print_array_as_mmc)
 
 def print_seq_spectrum_array_as_mma(alphabet, seq, omega, description):
-    print_seq_normalized_frequency_array(alphabet, seq, omega, description, 
+    print_seq_normalized_frequency_array(alphabet, seq, omega + 1, description, 
                                          normalize_array_as_spectrum, print_array_as_mma)
 
 def print_stationary_spectrum(alphabet, seq, omega, word_len, description,
                               print_array_func):
-    arr = build_frequency_array(alphabet, seq, omega)
+    arr = build_frequency_array(alphabet, seq, omega + 1)
     mat = normalize_array_as_markov(arr)
     alpha = len(alphabet)
     spec = build_stationary_spectrum(alpha, omega, mat, word_len)
@@ -210,12 +210,12 @@ def print_stationary_spectrum_as_mma(alphabet, seq, omega, word_len, description
     print_stationary_spectrum(alphabet, seq, omega, word_len, description,
                               print_array_as_mma)
 
-def build_dna_frequency_array(file_name, omega, masked=True):
+def build_dna_frequency_array(file_name, word_len, masked=True):
     alphabet = dna_alphabet
     file_handle = open(file_name)
     rec = SeqIO.parse(file_handle,"fasta").next()
     seq = str(rec.seq) if masked else str(rec.seq).upper()
-    arr = build_frequency_array(alphabet, seq, omega)
+    arr = build_frequency_array(alphabet, seq, word_len)
     file_handle.close()
     return arr
  
