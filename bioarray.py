@@ -131,6 +131,10 @@ def build_frequency_array(alphabet, seq, word_len):
        end_pos = pos + omega
     return result
 
+def build_frequency_vector(alphabet, seq, word_len):
+    alpha = len(alphabet)
+    return ss.coo_matrix(np.reshape(build_frequency_array(alphabet, seq, word_len), (alpha ** word_len,1)))
+  
 def normalize_array_as_markov(arr):
     result = np.zeros(arr.shape)
     nbr_rows = result.shape[0]
@@ -218,6 +222,22 @@ def build_dna_frequency_array(file_name, word_len, masked=True):
     arr = build_frequency_array(alphabet, seq, word_len)
     file_handle.close()
     return arr
+
+def build_dna_frequency_matrix_list(file_name, word_len, masked=True):
+    alphabet = dna_alphabet
+    file_handle = open(file_name)
+    mat_list =[]
+    for rec in SeqIO.parse(file_handle,"fasta"):
+        seq = str(rec.seq) if masked else str(rec.seq).upper()
+        mat_list.append(build_frequency_vector(alphabet, seq, word_len))
+    file_handle.close()
+    return mat_list
+
+def build_dna_frequency_matrix(file_name, word_len, masked=True):
+    return np.matrix(build_dna_frequency_matrix_list(file_name, word_len, masked)).T
+
+def build_dna_sparse_frequency_matrix(file_name, word_len, masked=True):
+    return ss.hstack(build_dna_frequency_matrix_list(file_name, word_len, masked),format="csr")
  
 def print_dna_arrays(file_name, omega_range, print_seq_array_func, masked=True, verbose=True, timed=True):
     alphabet = dna_alphabet
