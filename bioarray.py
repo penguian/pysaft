@@ -9,7 +9,7 @@ dna_alphabet = "ACGT"
 
 def restart_pos(alphabet, seq, word_len, start_pos):
     str_len = len(seq)
-    for result in xrange(start_pos, str_len - word_len + 1):
+    for result in xrange(start_pos, str_len - word_len):
         for rel_pos in xrange(word_len):
             pos = result + rel_pos
             if seq[pos] not in alphabet:
@@ -113,27 +113,48 @@ def build_stationary_spectrum(alpha, omega, arr, word_len, tol=1.0e-10):
     return np.reshape(spectrum, (-1, alpha))
  
 def build_frequency_array(alphabet, seq, word_len):
-    alpha_dict = dict(zip(alphabet,range(len(alphabet))))
     alpha = len(alphabet)
+    alpha_dict = dict(zip(alphabet,range(alpha)))
     omega = word_len - 1
     result = np.zeros((alpha ** omega, alpha))
     str_len = len(seq)
     pos = restart_pos(alphabet, seq, word_len, 0)
-    end_pos = pos + omega
-    while (0 <= pos) and (end_pos < str_len):
-       if seq[end_pos] in alphabet:
-          row = word_to_state(alpha_dict, seq[pos : end_pos]) if pos < end_pos else 0
-          col = word_to_state(alpha_dict, seq[end_pos])
+    end_pos = pos + word_len
+    while (0 <= pos) and (end_pos <= str_len):
+       if seq[end_pos - 1] in alphabet:
+          row = word_to_state(alpha_dict, seq[pos : end_pos - 1]) if pos < end_pos else 0
+          col = word_to_state(alpha_dict, seq[end_pos - 1])
           result[row, col] += 1
           pos += 1
        else:   
-          pos = restart_pos(alphabet, seq, word_len, end_pos + 1)
-       end_pos = pos + omega
+          pos = restart_pos(alphabet, seq, word_len, end_pos)
+       end_pos = pos + word_len
     return result
 
 def build_frequency_vector(alphabet, seq, word_len):
     alpha = len(alphabet)
-    return ss.coo_matrix(np.reshape(build_frequency_array(alphabet, seq, word_len), (alpha ** word_len,1)))
+    alpha_dict = dict(zip(alphabet,range(alpha)))
+    frequency = np.zeros((alpha ** word_len, 1))
+    str_len = len(seq)
+    pos = restart_pos(alphabet, seq, word_len, 0)
+    end_pos = pos + word_len
+    nbr_words = 0
+    while (0 <= pos) and (end_pos <= str_len):
+       if seq[end_pos - 1] in alphabet:
+          row = word_to_state(alpha_dict, seq[pos : end_pos])
+          frequency[row, 0] += 1
+          pos += 1
+          nbr_words += 1
+       else:   
+          pos = restart_pos(alphabet, seq, word_len, end_pos)
+       end_pos = pos + word_len
+    return frequency, nbr_words
+ 
+def build_frequency_array(alphabet, seq, word_len):
+    alpha = len(alphabet)
+    omega = word_len - 1
+    frequency = build_frequency_vector(alphabet, seq, word_len)[0]
+    return np.reshape(frequency, (alpha ** omega, alpha))
   
 def normalize_array_as_markov(arr):
     result = np.zeros(arr.shape)
@@ -223,21 +244,29 @@ def build_dna_frequency_array(file_name, word_len, masked=True):
     file_handle.close()
     return arr
 
-def build_dna_frequency_matrix_list(file_name, word_len, masked=True):
+class seq_description(object):
+    def __init__(self, id, nbr_words):
+        self.id = id
+        self.nbr_words = nbr_words
+        
+def build_dna_frequency_lists(file_name, word_len, masked=True):
     alphabet = dna_alphabet
     file_handle = open(file_name)
-    mat_list =[]
+    freq_list = []
+    size_list = []
+    id_list = []
     for rec in SeqIO.parse(file_handle,"fasta"):
         seq = str(rec.seq) if masked else str(rec.seq).upper()
-        mat_list.append(build_frequency_vector(alphabet, seq, word_len))
+        frequency, nbr_words = build_frequency_vector(alphabet, seq, word_len)
+        id_list.append(rec.id)
+        freq_list.append(ss.coo_matrix(frequency))
+        size_list.append(nbr_words)
     file_handle.close()
-    return mat_list
-
-def build_dna_frequency_matrix(file_name, word_len, masked=True):
-    return np.matrix(build_dna_frequency_matrix_list(file_name, word_len, masked)).T
+    return freq_list, size_list, id_list
 
 def build_dna_sparse_frequency_matrix(file_name, word_len, masked=True):
-    return ss.hstack(build_dna_frequency_matrix_list(file_name, word_len, masked),format="csr")
+    freq_list, size_list, id_list = build_dna_frequency_lists(file_name, word_len, masked)
+    return ss.hstack(freq_list ,format="csr"), size_list, id_list
  
 def print_dna_arrays(file_name, omega_range, print_seq_array_func, masked=True, verbose=True, timed=True):
     alphabet = dna_alphabet
