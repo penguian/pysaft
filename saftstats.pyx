@@ -19,9 +19,9 @@
 
 import scipy.stats
 
-cdef double saft_stats_sum_freq_pow (object frequencies,
-                                     unsigned int freq_pow,
-                                     unsigned int sum_pow):
+cdef double sum_freq_pow (object frequencies,
+                          unsigned int freq_pow,
+                          unsigned int sum_pow):
     cdef double res = 0
     cdef unsigned int length = len(frequencies)
     cdef unsigned int i
@@ -35,7 +35,7 @@ cdef double saft_stats_sum_freq_pow (object frequencies,
  * that could be done here
 """
  
-cdef class saft_stats_context:
+cdef class stats_context:
     cdef double p_2_k
     cdef double sum_var_Yu
     cdef double cov_crab
@@ -53,7 +53,7 @@ cdef class saft_stats_context:
         cdef unsigned int j
 
         def p(freq_pow, sum_pow):
-            return saft_stats_sum_freq_pow(letters_frequencies, freq_pow, sum_pow)
+            return sum_freq_pow(letters_frequencies, freq_pow, sum_pow)
 
         self.word_size = word_size
         self.p_2_k     = p(2, k)
@@ -121,14 +121,14 @@ cdef class saft_stats_context:
         self.cov_ac2 -= (k - 1) * (k - 1) * p(2, 2 * k)
         self.cov_ac2 *= 2
 
-cpdef double saft_stats_mean (saft_stats_context context,
-                             unsigned int      query_size,
-                             unsigned int      subject_size):
+cpdef double mean (stats_context context,
+                   unsigned int  query_size,
+                   unsigned int  subject_size):
      return query_size * subject_size * context.p_2_k
 
-cpdef double saft_stats_var (saft_stats_context context,
-                            unsigned int      query_size,
-                            unsigned int      subject_size):
+cpdef double var (stats_context context,
+                  unsigned int  query_size,
+                  unsigned int  subject_size):
     cdef double cov_crab
     cdef int    m = query_size
     cdef int    n = subject_size
@@ -142,7 +142,7 @@ cpdef double saft_stats_var (saft_stats_context context,
 
     return mn * (context.sum_var_Yu + cov_crab + context.cov_diag + context.cov_ac1 + context.cov_ac2)
 
-def saft_stats_pgamma_m_v (d2, mean, var):
+def pgamma_m_v (d2, mean, var):
     scale = var / mean
     shape = mean / scale
     return scipy.stats.gamma.sf (d2, shape, scale=scale)
