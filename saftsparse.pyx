@@ -18,60 +18,10 @@
 
 import numpy as np
 import scipy.sparse as ss
-#from Bio.SeqIO import FastaIO
+from Bio import SeqIO
 from time import time
 
 dna_alphabet = "ACGT"
-
-def SimpleFastaParser(handle):
-    """Generator function to iterator over Fasta records (as string tuples).
-
-    For each record a tuple of two strings is returned, the FASTA title
-    line (without the leading '>' character), and the sequence (with any
-    whitespace removed). The title line is not divided up into an
-    identifier (the first word) and comment or description.
-
-    >>> for values in SimpleFastaParser(open("Fasta/dups.fasta")):
-    ...     print values
-    ('alpha', 'ACGTA')
-    ('beta', 'CGTC')
-    ('gamma', 'CCGCC')
-    ('alpha (again - this is a duplicate entry to test the indexing code)', 'ACGTA')
-    ('delta', 'CGCGC')
-
-    """
-    #Skip any text before the first record (e.g. blank lines, comments)
-    while True:
-        line = handle.readline()
-        if line == "":
-            return  # Premature end of file, or just empty?
-        if line[0] == ">":
-            break
-
-    while True:
-        if line[0] != ">":
-            raise ValueError(
-                "Records in Fasta files should start with '>' character")
-        title = line[1:].rstrip()
-        lines = []
-        line = handle.readline()
-        while True:
-            if not line:
-                break
-            if line[0] == ">":
-                break
-            lines.append(line.rstrip())
-            line = handle.readline()
-
-        #Remove trailing whitespace, and any internal spaces
-        #(and any embedded \r which are possible in mangled files
-        #when not opened in universal read lines mode)
-        yield title, "".join(lines).replace(" ", "").replace("\r", "")
-
-        if not line:
-            return  # StopIteration
-
-    assert False, "Should not reach this line"
      
 cdef int restart_pos(alpha_dict, char* seq, unsigned int word_len, unsigned int start_pos):
     cdef unsigned int seq_len = len(seq)
@@ -97,10 +47,9 @@ cdef unsigned int word_to_state(alpha_dict, char* seq, int start_pos, int end_po
 cdef build_frequency_vector(alpha_dict, char* seq, unsigned int word_len):
     cdef unsigned int alpha = len(alpha_dict)
     cdef unsigned long freq_len = alpha ** word_len
-    frequency = np.zeros((freq_len, 1))
-    # frequency = ss.dok_matrix((alpha ** word_len, 1))
-    cdef unsigned int seq_len = len(seq)
-    cdef unsigned long nbr_words = 0
+    cdef unsigned long seq_len = len(seq)
+    rows = np.empty((seq_len),dtype=np.uint64)
+    cdef unsigned long word_nbr = 0
     cdef unsigned long row
     cdef int start_pos = restart_pos(alpha_dict, seq, word_len, 0)
     restarted = True
@@ -112,15 +61,19 @@ cdef build_frequency_vector(alpha_dict, char* seq, unsigned int word_len):
                 row = word_to_state(alpha_dict, seq, start_pos, end_pos)
             else:
                 row = (row * alpha + alpha_dict[end_char]) % freq_len
+            rows[word_nbr] = row    
             restarted = False
-            frequency[row, 0] += 1
             start_pos += 1
-            nbr_words += 1
+            word_nbr += 1
         else:   
             start_pos = restart_pos(alpha_dict, seq, word_len, end_pos)
             restarted = True
         end_pos = start_pos + word_len
-    return frequency, nbr_words
+    rows = rows[: word_nbr]    
+    cols = np.zeros((word_nbr),dtype=np.uint8)
+    data = np.ones(word_nbr)
+    frequency = ss.coo_matrix((data,(rows, cols)), shape=(freq_len, 1))
+    return frequency, word_nbr
 
 def build_dna_frequency_lists(file_name, unsigned int word_len, masked=True):
     cdef char* alphabet = dna_alphabet
@@ -128,26 +81,20 @@ def build_dna_frequency_lists(file_name, unsigned int word_len, masked=True):
     alpha_dict = {}
     for k in xrange(alpha):
         alpha_dict[<char>(alphabet[k])] = k
-    file_handle = open(file_name)
     freq_list = []
     size_list = []
-    id_list = []
+    desc_list = []
     cdef char* seq
-    #for rec in SeqIO.parse(file_handle,"fasta"):
-    #for recid, recseq in FastaIO.SimpleFastaParser(file_handle):
-    for recid, recseq in SimpleFastaParser(file_handle):
-        #recseq = str(rec.seq) if masked else str(rec.seq).upper()
-        reqseq = recseq if masked else recseq.upper()
-        seq = recseq
-        frequency, nbr_words = build_frequency_vector(alpha_dict, seq, word_len)
-        freq_list.append(ss.coo_matrix(frequency))
-        # freq_list.append(frequency)
-        size_list.append(nbr_words)
-        #id_list.append(rec.id)
-        id_list.append(recid)
-    file_handle.close()
-    return freq_list, size_list, id_list
+    with open(file_name) as file_handle:
+        for rec in SeqIO.parse(file_handle,"fasta"):
+            recseq = str(rec.seq) if masked else str(rec.seq).upper()
+            seq = recseq
+            frequency, nbr_words = build_frequency_vector(alpha_dict, seq, word_len)
+            freq_list.append(frequency)
+            size_list.append(nbr_words)
+            desc_list.append(rec.description)
+    return freq_list, size_list, desc_list
 
 def build_dna_sparse_frequency_matrix(file_name, word_len, masked=True):
-    freq_list, size_list, id_list = build_dna_frequency_lists(file_name, word_len, masked)
-    return ss.hstack(freq_list ,format="csr"), size_list, id_list
+    freq_list, size_list, desc_list = build_dna_frequency_lists(file_name, word_len, masked)
+    return ss.hstack(freq_list ,format="csr"), size_list, desc_list

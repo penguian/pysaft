@@ -17,6 +17,7 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 
+import numpy as np
 import scipy.stats
 
 cdef double sum_freq_pow (object frequencies,
@@ -142,7 +143,7 @@ cpdef double var (stats_context context,
 
     return mn * (context.sum_var_Yu + cov_crab + context.cov_diag + context.cov_ac1 + context.cov_ac2)
 
-def pgamma_m_v (d2, mean, var):
-    scale = var / mean
-    shape = mean / scale
+def pgamma_m_v (d2, double mean, double var):
+    cdef double scale = var / mean
+    cdef double shape = mean / scale
     return scipy.stats.gamma.sf (d2, shape, scale=scale)
