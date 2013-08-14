@@ -62,10 +62,10 @@ context = saftstats.stats_context(args.wordsize, alpha_freq)
 #d2_vars  = np.zeros((inp_len, dat_len))
 #d2_pvals = np.zeros((inp_len, dat_len))
 
-# d2_means = np.array([[saftstats.mean(context, inp_size[i], dat_size[j]) 
-#                       for j in xrange(dat_len)] for i in xrange(inp_len)])
-# d2_vars  = np.array([[saftstats.var(context, inp_size[i], dat_size[j]) 
-#                       for j in xrange(dat_len)] for i in xrange(inp_len)])
+d2_means = np.array([[saftstats.mean(context, inp_size[i], dat_size[j]) 
+                      for j in xrange(dat_len)] for i in xrange(inp_len)])
+d2_vars  = np.array([[saftstats.var(context, inp_size[i], dat_size[j]) 
+                      for j in xrange(dat_len)] for i in xrange(inp_len)])
 
 # print "vals  type ==", type(d2_vals)
 # print "vals  shape==", d2_vals.shape
@@ -79,21 +79,24 @@ context = saftstats.stats_context(args.wordsize, alpha_freq)
 #        d2_means[i,j] = saftstats.mean(context, inp_size[i], dat_size[j])
 #        d2_vars[i,j]  = saftstats.var(context, inp_size[i], dat_size[j])
 
-# print "Means and vars time ==", "{:f}".format( time() - tick )
+print "Means and vars time ==", "{:f}".format( time() - tick )
 
 # Calculate p values.
 
-# tick = time()
+tick = time()
+
+d2_pvals = np.array(saftstats.pgamma_m_v(d2_vals, d2_means, d2_vars))
+                         
+# d2_pvalsnew = np.array([[saftstats.pgamma_m_v(d2_vals[i, j], 
+#                                           d2_means[i, j], 
+#                                           d2_vars[i, j])
+#                      for j in xrange(dat_len)] for i in xrange(inp_len)])
+# print d2_pvals - d2_pvalsnew
 
 # d2_pvals = np.array([[saftstats.pgamma_m_v(d2_vals[i, j], 
-#                                            d2_means[i, j], 
-#                                            d2_vars[i, j])
+#                                            saftstats.mean(context, inp_size[i], dat_size[j]), 
+#                                            saftstats.var(context, inp_size[i], dat_size[j]))
 #                       for j in xrange(dat_len)] for i in xrange(inp_len)])
-
-d2_pvals = np.array([[saftstats.pgamma_m_v(d2_vals[i, j], 
-                                           saftstats.mean(context, inp_size[i], dat_size[j]), 
-                                           saftstats.var(context, inp_size[i], dat_size[j]))
-                      for j in xrange(dat_len)] for i in xrange(inp_len)])
 # print d2_pvals.shape
 
 print "Calc p-values  time ==", "{:f}".format( time() - tick )
