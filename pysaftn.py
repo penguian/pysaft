@@ -18,6 +18,8 @@ def parse_args():
                         help="path to the output file")
     parser.add_argument("--wordsize", action="store", type=int,   default=7,     
                         help="word size")
+    parser.add_argument("--showmax",  action="store", type=int,   default=50,  
+                        help="show results with a p-value smaller than this")
     parser.add_argument("--pmax",     action="store", type=float, default=0.05,  
                         help="show results with a p-value smaller than this")
     return parser.parse_args()
@@ -44,8 +46,6 @@ print "Sequence parse time ==", "{:f}".format( time() - tick )
 tick = time()
 
 d2_vals = np.asarray((inp_freq.T * dat_freq).todense())
-# print "vals  type ==", type(d2_vals)
-# print "vals  shape==", d2_vals.shape
 
 print "Calculate d2   time ==", "{:f}".format( time() - tick )
 
@@ -57,27 +57,11 @@ inp_len = inp_freq.shape[1]
 dat_len = dat_freq.shape[1]
 
 context = saftstats.stats_context(args.wordsize, alpha_freq)
- 
-#d2_means = np.zeros((inp_len, dat_len))
-#d2_vars  = np.zeros((inp_len, dat_len))
-#d2_pvals = np.zeros((inp_len, dat_len))
 
 d2_means = np.array([[saftstats.mean(context, inp_size[i], dat_size[j]) 
                       for j in xrange(dat_len)] for i in xrange(inp_len)])
 d2_vars  = np.array([[saftstats.var(context, inp_size[i], dat_size[j]) 
                       for j in xrange(dat_len)] for i in xrange(inp_len)])
-
-# print "vals  type ==", type(d2_vals)
-# print "vals  shape==", d2_vals.shape
-# print "means type==",  type(d2_means)
-# print "means shape==", d2_means.shape
-# print "vars  type==",  type(d2_vars)
-# print "vars  shape==", d2_vars.shape
- 
-#for i in xrange(inp_len):
-#    for j in xrange(dat_len):
-#        d2_means[i,j] = saftstats.mean(context, inp_size[i], dat_size[j])
-#        d2_vars[i,j]  = saftstats.var(context, inp_size[i], dat_size[j])
 
 print "Means and vars time ==", "{:f}".format( time() - tick )
 
@@ -86,18 +70,6 @@ print "Means and vars time ==", "{:f}".format( time() - tick )
 tick = time()
 
 d2_pvals = np.array(saftstats.pgamma_m_v(d2_vals, d2_means, d2_vars))
-                         
-# d2_pvalsnew = np.array([[saftstats.pgamma_m_v(d2_vals[i, j], 
-#                                           d2_means[i, j], 
-#                                           d2_vars[i, j])
-#                      for j in xrange(dat_len)] for i in xrange(inp_len)])
-# print d2_pvals - d2_pvalsnew
-
-# d2_pvals = np.array([[saftstats.pgamma_m_v(d2_vals[i, j], 
-#                                            saftstats.mean(context, inp_size[i], dat_size[j]), 
-#                                            saftstats.var(context, inp_size[i], dat_size[j]))
-#                       for j in xrange(dat_len)] for i in xrange(inp_len)])
-# print d2_pvals.shape
 
 print "Calc p-values  time ==", "{:f}".format( time() - tick )
 
@@ -106,17 +78,12 @@ print "Calc p-values  time ==", "{:f}".format( time() - tick )
 tick = time()
 
 for i in xrange(inp_len):
-    print ""
-    print inp_desc[i], ":"
-    jrange = [j for j in xrange(dat_len) if d2_pvals[i, j] < args.pmax]
+    print "Query:", inp_desc[i], "program: saftn word size:", args.wordsize
     d2_vals_i  = np.array(d2_vals[i, :])
     d2_pvals_i = np.array(d2_pvals[i, :])
-    #print d2_vals_i.shape
-    #print d2_pvals_i.shape
-    for j in jrange:
-        print ">", dat_desc[j]
-        # print "Hit: d2 ==", d2_vals[i, j], ", p-value == ", d2_pvals[i, j]
-        # print j
-        print "Hit: d2 ==", d2_vals_i[j], ", p-value == ", d2_pvals_i[j]
+    jsorted = np.argsort(d2_pvals_i).tolist()
+    jrange = [j for j in jsorted if d2_pvals_i[j] < args.pmax]
+    for j in jrange[: args.showmax]:
+        print "  Hit:", dat_desc[j], "D2:", "{:d}".format(long(d2_vals_i[j])), "adj.p.val:", "{:11.5e}".format(d2_pvals_i[j]), "p.val:", "{:11.5e}".format(d2_pvals_i[j])
 
 print "Print p-values time ==", "{:f}".format( time() - tick )
