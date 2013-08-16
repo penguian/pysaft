@@ -128,25 +128,27 @@ cdef class stats_context:
 cpdef double mean (stats_context context,
                    unsigned int  query_size,
                    unsigned int  subject_size):
-    result = query_size * subject_size * context.p_2_k
-    return result
+    
+    cdef double m = query_size
+    cdef double n = subject_size
+    cdef double mn = m * n
+    return mn * context.p_2_k
 
 cpdef double var (stats_context context,
                   unsigned int  query_size,
                   unsigned int  subject_size):
-    cdef double cov_crab
+
     cdef double m = query_size
     cdef double n = subject_size
-    cdef int    k = context.word_size
     cdef double mn = m * n
+    cdef int    k = context.word_size
        
-    cov_crab   = (n + m - 4 * k + 2) * context.cov_crab
+    cdef double cov_crab = (n + m - 4 * k + 2) * context.cov_crab
 
     if (context.word_size == 1):
         return mn * (context.sum_var_Yu + cov_crab)
 
-    result = mn * (context.sum_var_Yu + cov_crab + context.cov_diag + context.cov_ac1 + context.cov_ac2)
-    return result
+    return mn * (context.sum_var_Yu + cov_crab + context.cov_diag + context.cov_ac1 + context.cov_ac2)
 
 def pgamma_m_v (d2, mean, var):
     scale = var / mean
