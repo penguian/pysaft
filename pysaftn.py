@@ -58,9 +58,9 @@ dat_len = dat_freq.shape[1]
 
 context = saftstats.stats_context(args.wordsize, alpha_freq)
 
-d2_means = np.array([[saftstats.mean(context, inp_size[i], dat_size[j]) 
+d2_means = np.array([[saftstats.mean(context, inp_size[i] + args.wordsize - 1, dat_size[j] + args.wordsize - 1) 
                       for j in xrange(dat_len)] for i in xrange(inp_len)])
-d2_vars  = np.array([[saftstats.var(context, inp_size[i], dat_size[j]) 
+d2_vars  = np.array([[saftstats.var(context, inp_size[i] + args.wordsize - 1, dat_size[j] + args.wordsize - 1) 
                       for j in xrange(dat_len)] for i in xrange(inp_len)])
 
 print "Means and vars time ==", "{:f}".format( time() - tick )
