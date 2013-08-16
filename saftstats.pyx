@@ -16,9 +16,12 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
+#cython: cdivsion=True
+#cython: cdivision_warnings=True
 
 import numpy as np
 import scipy.stats
+from cython_gsl cimport gsl_cdf_gamma_Q
 
 cdef double sum_freq_pow (object frequencies,
                           unsigned int freq_pow,
@@ -70,6 +73,8 @@ cdef class stats_context:
                 break
 
         self.sum_var_Yu = p (2, k) - p (2, 2 * k)
+        if self.sum_var_Yu < 0:
+            print "Warning: sum_var_Yu:", self.sum_var_Yu
 
         if not self.unif:
             self.cov_crab = (p(3, k) +
@@ -115,36 +120,83 @@ cdef class stats_context:
                     t = 1 + 2 * nu
                     if (x <= ro):
                         t += 1
-                    if (x + i <= ro):
+                    if (x + j <= ro):
                         t += 1
                     prod2 *= p(t, 1)
                 self.cov_ac2 += prod1 * prod2
         self.cov_ac2 -= (k - 1) * (k - 1) * p(2, 2 * k)
         self.cov_ac2 *= 2
+        if self.cov_crab < 0:
+            print "Warning: cov_crab:", self.cov_crab
+        if self.cov_diag < 0:
+            print "Warning: cov_diag:", self.cov_diag
+        if self.cov_ac1 < 0:
+            print "Warning: cov_ac1:", self.cov_ac1
+        if self.cov_ac2 < 0:
+            print "Warning: cov_ac2:", self.cov_ac2
 
 cpdef double mean (stats_context context,
                    unsigned int  query_size,
                    unsigned int  subject_size):
-     return query_size * subject_size * context.p_2_k
+    result = query_size * subject_size * context.p_2_k
+    if result < 0:
+        print "Warning: mean == ", result
+    return result
 
 cpdef double var (stats_context context,
                   unsigned int  query_size,
                   unsigned int  subject_size):
     cdef double cov_crab
-    cdef int    m = query_size
-    cdef int    n = subject_size
+    cdef double m = query_size
+    cdef double n = subject_size
     cdef int    k = context.word_size
     cdef double mn = m * n
 
+    if n + m - 4 * k + 2 < 0:
+         print "Warning: k ==", k, "is too large for combined sequence size m+n ==", m + n
+         return 0
+       
     cov_crab   = (n + m - 4 * k + 2) * context.cov_crab
 
     if (context.word_size == 1):
         return mn * (context.sum_var_Yu + cov_crab)
 
-    return mn * (context.sum_var_Yu + cov_crab + context.cov_diag + context.cov_ac1 + context.cov_ac2)
+    result = mn * (context.sum_var_Yu + cov_crab + context.cov_diag + context.cov_ac1 + context.cov_ac2)
+    if mn < 0:
+        print "Warning: mn ==", mn
+    if context.sum_var_Yu < 0:
+        print "Warning: context.sum_var_Yu ==", context.sum_var_Yu
+    if cov_crab < 0:
+        print "Warning: cov_crab ==", cov_crab
+    if context.cov_diag < 0:
+        print "Warning: context.cov_diag ==", context.cov_diag
+    if context.cov_ac1 < 0:
+        print "Warning: context.cov_ac1 ==", context.cov_ac1
+    if context.cov_ac2 < 0:
+        print "Warning: context.cov_ac2 ==", context.cov_ac2
+        
+    if result < 0:
+        print "Warning: var ==", result
+    return result
 
 def pgamma_m_v (d2, mean, var):
     scale = var / mean
     shape = mean / scale
-
-    return scipy.stats.gamma.sf (d2, shape, scale=scale)
+ 
+    cdef unsigned int rows = d2.shape[0]
+    cdef unsigned int cols = d2.shape[1]
+    
+    # result = scipy.stats.gamma.sf (d2, shape, scale=scale)
+    result = np.empty(d2.shape)
+    cdef unsigned int i
+    cdef unsigned int j
+    for i in xrange(rows):
+        for j in xrange(cols):
+            if i == 502 and j == 502:
+                print d2[i,j]
+                print shape[i,j]
+                print scale[i,j]
+            result[i, j] = gsl_cdf_gamma_Q (d2[i, j], shape[i, j], scale[i, j])
+            # print "i:", i, "j:", j, "result;", result[i,j]
+            # print "i:", i, "j:", j, "diff:", result[i,j] - gsl_result, "result;", result[i,j], "gsl_result:", gsl_result
+    return result
