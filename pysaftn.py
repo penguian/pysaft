@@ -69,7 +69,7 @@ print "Means and vars time ==", "{:f}".format( time() - tick )
 
 tick = time()
 
-d2_pvals = np.array(saftstats.pgamma_m_v(d2_vals, d2_means, d2_vars))
+d2_pvals = saftstats.pgamma_m_v(d2_vals, d2_means, d2_vars)
 
 print "Calc p-values  time ==", "{:f}".format( time() - tick )
 
@@ -79,11 +79,17 @@ tick = time()
 
 for i in xrange(inp_len):
     print "Query:", inp_desc[i], "program: saftn word size:", args.wordsize
-    d2_vals_i  = np.array(d2_vals[i, :])
-    d2_pvals_i = np.array(d2_pvals[i, :])
-    jsorted = np.argsort(d2_pvals_i).tolist()
-    jrange = [j for j in jsorted if d2_pvals_i[j] < args.pmax]
-    for j in jrange[: args.showmax]:
-        print "  Hit:", dat_desc[j], "D2:", "{:d}".format(long(d2_vals_i[j])), "adj.p.val:", "{:11.5e}".format(d2_pvals_i[j]), "p.val:", "{:11.5e}".format(d2_pvals_i[j])
+    d2_vals_i  = d2_vals[i, :]
+    d2_pvals_i = d2_pvals[i, :]
+    jsorted = np.argsort(d2_pvals_i)
+    d2_adj_pvals_i = saftstats.BH_array(d2_pvals_i[jsorted])
+    nbr_pvals = min(args.showmax, d2_adj_pvals_i.shape[0])
+    jrange = [j for j in xrange(nbr_pvals) if d2_adj_pvals_i[j] < args.pmax]
+    if len(jrange) > 0:
+        for j in jrange:
+            js = jsorted[j]
+            print "  Hit:", dat_desc[js], "D2:", "{:d}".format(long(d2_vals_i[js])), "adj.p.val:", "{:11.5e}".format(d2_adj_pvals_i[j]), "p.val:", "{:11.5e}".format(d2_pvals_i[js])
+    else:
+        print "No hit found"
 
 print "Print p-values time ==", "{:f}".format( time() - tick )

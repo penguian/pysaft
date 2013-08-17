@@ -164,3 +164,19 @@ def pgamma_m_v (d2, mean, var):
         for j in xrange(cols):
             result[i, j] = gsl_cdf_gamma_Q (d2[i, j], shape[i, j], scale[i, j])
     return result
+
+"""
+ * Benjamini and Hochberg method
+ * p_values are expected to be already sorted in increasing order
+"""
+def BH_array (p_values):
+    cdef int i
+
+    result = np.empty(p_values.shape)
+    n_p_values = p_values.shape[0]
+    result[n_p_values - 1] = p_values[n_p_values - 1]
+    for i in xrange(n_p_values - 2, -1, -1):
+        result[i] = (p_values[i] * n_p_values) / (i + 1)
+        if (result[i] > result[i + 1]):
+            result[i] = result[i + 1];
+    return result
