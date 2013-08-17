@@ -13,15 +13,17 @@ def parse_args():
     parser = argparse.ArgumentParser(
         description="Prototype faster SAFT using SciPy sparse matrix multiplication")
     parser.add_argument("--input",    action="store", required=True, 
-                        help="path to the input file")
+                        help="Path to the input file")
     parser.add_argument("--database", action="store", required=True, 
-                        help="path to the output file")
+                        help="Path to the output file")
     parser.add_argument("--wordsize", action="store", type=int,   default=7,     
-                        help="word size")
+                        help="Word size (7)")
     parser.add_argument("--showmax",  action="store", type=int,   default=50,  
-                        help="show results with a p-value smaller than this")
+                        help="Maximum number of results to show (50)")
     parser.add_argument("--pmax",     action="store", type=float, default=0.05,  
-                        help="show results with a p-value smaller than this")
+                        help="Show results with a p-value smaller than this (0.05)")
+    parser.add_argument("--timing",   action="store_true",        default=False,
+                        help="Time key processing steps (False)")
     return parser.parse_args()
 
 # Parse arguments.
@@ -30,28 +32,34 @@ tick = time()
 
 args = parse_args()
 
-print "Argument parse time ==", "{:f}".format( time() - tick )
+if args.timing:
+    print "Argument parse time ==", "{:f}".format( time() - tick )
 
 # Parse input and database sequences and build frequency matrices.
 
-tick = time()
+if args.timing:
+    tick = time()
 
 inp_freq, inp_size, inp_desc = saftsparse.build_dna_sparse_frequency_matrix(args.input, args.wordsize)
 dat_freq, dat_size, dat_desc = saftsparse.build_dna_sparse_frequency_matrix(args.database, args.wordsize)
 
-print "Sequence parse time ==", "{:f}".format( time() - tick )
+if args.timing:
+    print "Sequence parse time ==", "{:f}".format( time() - tick )
 
 # Calculate d2.
 
-tick = time()
+if args.timing:
+    tick = time()
 
 d2_vals = np.asarray((inp_freq.T * dat_freq).todense())
 
-print "Calculate d2   time ==", "{:f}".format( time() - tick )
+if args.timing:
+    print "Calculate d2   time ==", "{:f}".format( time() - tick )
 
 # Calculate theroretical means and vars.
 
-tick = time()
+if args.timing:
+    tick = time()
 
 inp_len = inp_freq.shape[1]
 dat_len = dat_freq.shape[1]
@@ -63,19 +71,23 @@ d2_means = np.array([[saftstats.mean(context, inp_size[i] + args.wordsize - 1, d
 d2_vars  = np.array([[saftstats.var(context, inp_size[i] + args.wordsize - 1, dat_size[j] + args.wordsize - 1) 
                       for j in xrange(dat_len)] for i in xrange(inp_len)])
 
-print "Means and vars time ==", "{:f}".format( time() - tick )
+if args.timing:
+    print "Means and vars time ==", "{:f}".format( time() - tick )
 
 # Calculate p values.
 
-tick = time()
+if args.timing:
+    tick = time()
 
 d2_pvals = saftstats.pgamma_m_v(d2_vals, d2_means, d2_vars)
 
-print "Calc p-values  time ==", "{:f}".format( time() - tick )
+if args.timing:
+    print "Calc p-values  time ==", "{:f}".format( time() - tick )
 
 # Print p values.
 
-tick = time()
+if args.timing:
+    tick = time()
 
 for i in xrange(inp_len):
     print "Query:", inp_desc[i], "program: saftn word size:", args.wordsize
@@ -92,4 +104,5 @@ for i in xrange(inp_len):
     else:
         print "No hit found"
 
-print "Print p-values time ==", "{:f}".format( time() - tick )
+if args.timing:
+    print "Print p-values time ==", "{:f}".format( time() - tick )
