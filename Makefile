@@ -10,4 +10,4 @@ saftstats.so: saftstats.pyx
 	CFLAGS=$(CFLAGS) python setup_saftstats.py build_ext --inplace
 
 clean:
-	rm saftmain.c saftsparse.c saftstats.c saftmain.so saftsparse.so saftstats.so
+	rm saftmain.c saftsparse.c saftstats.c saftmain.so saftsparse.so saftstats.so; rm -rf build
