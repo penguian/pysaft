@@ -1,0 +1,11 @@
+CFLAGS="-g -O3"
+
+all: MPIsaftsparse.so saftstats.so
+
+MPIsaftsparse.so: MPIsaftsparse.pyx
+	CFLAGS=$(CFLAGS) python setup_MPIsaftsparse.py build_ext --inplace
+saftstats.so: saftstats.pyx
+	CFLAGS=$(CFLAGS) python setup_saftstats.py build_ext --inplace
+
+clean:
+	rm MPIsaftsparse.c saftstats.c MPIsaftsparse.so saftstats.so; rm -rf build
