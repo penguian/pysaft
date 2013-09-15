@@ -20,6 +20,7 @@ import argparse
 import numpy as np
 import MPIsaftsparse as saftsparse
 import saftstats
+import itertools
 from mpi4py import MPI
 from time import time
 
@@ -62,9 +63,6 @@ my_mpi_rank = comm.rank
 if my_mpi_rank != 0:
     my_mpi_row = (my_mpi_rank - 1) // mpi_nbr_cols
     my_mpi_col = (my_mpi_rank - 1) %  mpi_nbr_cols
-    #print "I am worker", my_mpi_rank, my_mpi_row, my_mpi_col
-#else:
-    #print "I am scribe."
 
 if args.timing and my_mpi_rank == 0:
     print "Argument parse time ==", "{:f}".format( time() - tick )
@@ -81,11 +79,11 @@ if my_mpi_rank == 0:
     dat_len = len(dat_desc)
 else:
     inp_freq, inp_size, inp_desc = saftsparse.build_dna_sparse_frequency_matrix(
-        args.input,    args.wordsize, my_mpi_row, mpi_nbr_rows, desc=True)
+        args.input,    args.wordsize, my_mpi_row, mpi_nbr_rows, desc=False)
     inp_len = inp_freq.shape[1]
 
     dat_freq, dat_size, dat_desc = saftsparse.build_dna_sparse_frequency_matrix(
-        args.database, args.wordsize, my_mpi_col, mpi_nbr_cols, desc=True)
+        args.database, args.wordsize, my_mpi_col, mpi_nbr_cols, desc=False)
     dat_len = dat_freq.shape[1]
 
 if args.timing and my_mpi_rank == 1:
@@ -135,8 +133,6 @@ row_comms = []
 for mpi_row in xrange(mpi_nbr_rows):
     if my_mpi_rank == 0 or mpi_row == my_mpi_row:
         ranks = [0] + range(mpi_row * mpi_nbr_cols + 1, (mpi_row + 1) * mpi_nbr_cols + 1)
-        #if my_mpi_rank == 0:
-            #print ranks
         mpi_row_group = world_group.Incl(ranks)
         mpi_row_comm = comm.Create(mpi_row_group)
         if my_mpi_rank == 0:
@@ -146,9 +142,10 @@ for mpi_row in xrange(mpi_nbr_rows):
             my_row_group = mpi_row_group
             my_row_comm  = mpi_row_comm
     else:
-        mpi_row_group = world_group.Incl([0]) #MPI.GROUP_EMPTY
         # Open MPI has a bug which produces a segfault if
         # MPI.GROUP_EMPTY is used in the call to Incl().
+
+        mpi_row_group = world_group.Incl([0]) #MPI.GROUP_EMPTY
         mpi_row_comm = comm.Create(mpi_row_group)
 
 # Get database lengths across the first row.
@@ -157,13 +154,18 @@ dat_len_vec = np.zeros(mpi_nbr_cols + 1, dtype=np.int64)
 dat_len_val = np.array(dat_len, dtype=np.int64)
 if my_mpi_rank == 0:
     mpi_row_comm = row_comms[0]
-    #print "Scribe gathering", i, i % mpi_nbr_rows
     mpi_row_comm.Gather([dat_len_val, MPI.LONG], [dat_len_vec, MPI.LONG])
+
     # Zero out entry zero - we don't want to send ourselves unnecessary data.
+
     dat_len_vec[0] = 0
+
+    # The order of the D2 and p values will be disturbed by the Gatherv below,
+    # Use dat_len_vec to create a list of indices that unscrambles the results of the Gatherv.
+
+    gathered_indices = sum([range(mpi_col, dat_len, mpi_nbr_cols) for mpi_col in xrange(mpi_nbr_cols)],[])
 elif my_mpi_row == 0:
     mpi_row_comm = my_row_comm
-    #print "Row", my_mpi_row, "gathering"
     mpi_row_comm.Gather([dat_len_val, MPI.LONG], [dat_len_vec, MPI.LONG])
 
 # Print p values.
@@ -171,9 +173,10 @@ elif my_mpi_row == 0:
 if args.timing and my_mpi_rank == 0:
     tick = time()
 
-
 if my_mpi_rank == 0:
+
     # Initialize the vectors d2_vals_i for D2 values, and d2_pvals_i for p values.
+
     d2_vals_i  = np.empty(dat_len, dtype=np.double)
     d2_pvals_i = np.empty(dat_len, dtype=np.double)
 
@@ -183,11 +186,14 @@ for i in xrange(inp_len):
         print "Query:", inp_desc[i], "program: saftn word size:", args.wordsize
 
     if my_mpi_rank != 0:
+
         # Initialize the vectors d2_vals_i for D2 values, and d2_pvals_i for p values.
+
         d2_vals_i  = d2_vals[i, :]
         d2_pvals_i = d2_pvals[i, :]
 
     # Gather the D2 values and p values into the scribe process.
+
     if my_mpi_rank == 0:
         mpi_row_comm = row_comms[i % mpi_nbr_rows]
         mpi_row_comm.Gatherv([None, MPI.DOUBLE], [d2_vals_i,  (dat_len_vec, None), MPI.DOUBLE])
@@ -197,8 +203,6 @@ for i in xrange(inp_len):
         mpi_row_comm.Gatherv([d2_vals_i,  MPI.DOUBLE], [None, (dat_len_vec, None), MPI.DOUBLE])
         mpi_row_comm.Gatherv([d2_pvals_i, MPI.DOUBLE], [None, (dat_len_vec, None), MPI.DOUBLE])
 
-    # TODO: The order of rhe D2 and p values has been disturbed by the gather,
-    # so the old code with argsort and dat_desc[js] will need to be changed.
     if my_mpi_rank == 0:
         jsorted = np.argsort(d2_pvals_i)
         d2_adj_pvals_i = saftstats.BH_array(d2_pvals_i[jsorted])
@@ -207,14 +211,10 @@ for i in xrange(inp_len):
         if len(jrange) > 0:
             for j in jrange:
                 js = jsorted[j]
-                print "  Hit:", dat_desc[js], "D2:", "{:d}".format(long(d2_vals_i[js])), "adj.p.val:", "{:11.5e}".format(d2_adj_pvals_i[j]), "p.val:", "{:11.5e}".format(d2_pvals_i[js])
+                jg = gathered_indices[js]
+                print "  Hit:", dat_desc[jg], "D2:", "{:d}".format(long(d2_vals_i[js])), "adj.p.val:", "{:11.5e}".format(d2_adj_pvals_i[j]), "p.val:", "{:11.5e}".format(d2_pvals_i[js])
         else:
             print "No hit found"
 
 if args.timing and my_mpi_rank == 0:
     print "Print p-values time ==", "{:f}".format( time() - tick )
-
-#if my_mpi_rank == 0:
-    #print "I am scribe."
-#else:
-    #print "I am worker", my_mpi_rank, my_mpi_row, my_mpi_col
