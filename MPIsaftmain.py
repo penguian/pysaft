@@ -183,7 +183,12 @@ for i in xrange(inp_len):
         # Cut off by number of p values within this process.
 
         nbr_pvals = min(args.showmax, d2_pvals_i.shape[0])
+
+        # Store the global indices resulting from the sorting.
+
+        local_to_global = lambda j: my_mpi_col + j * mpi_nbr_cols
         j_vals_i = jsorted[:nbr_pvals]
+        j_vals_i_global = np.array(map(local_to_global, j_vals_i), dtype=np.int64)
 
     # Get database lengths.
 
@@ -201,7 +206,7 @@ for i in xrange(inp_len):
         mpi_row_comm = my_row_comm
         mpi_row_comm.Gather([dat_len_val, MPI.LONG], [dat_len_vec, MPI.LONG])
 
-    # Gather the local indices, D2 values and p values into the scribe process.
+    # Gather the global indices, D2 values and p values into the scribe process.
 
     if my_mpi_rank == 0:
         mpi_row_comm = row_comms[i % mpi_nbr_rows]
@@ -210,25 +215,15 @@ for i in xrange(inp_len):
         mpi_row_comm.Gatherv([None, MPI.DOUBLE], [d2_pvals_i, (dat_len_vec, None), MPI.DOUBLE])
     else:
         mpi_row_comm = my_row_comm
-        mpi_row_comm.Gatherv([j_vals_i,             MPI.LONG],   [None, (dat_len_vec, None), MPI.LONG])
+        mpi_row_comm.Gatherv([j_vals_i_global,      MPI.LONG],   [None, (dat_len_vec, None), MPI.LONG])
         mpi_row_comm.Gatherv([d2_vals_i[j_vals_i],  MPI.DOUBLE], [None, (dat_len_vec, None), MPI.DOUBLE])
         mpi_row_comm.Gatherv([d2_pvals_i[j_vals_i], MPI.DOUBLE], [None, (dat_len_vec, None), MPI.DOUBLE])
 
     if my_mpi_rank == 0:
 
-        # Translate process-local indices in j_vals_i to global indices in j_vals_i_global.
-
-        local_to_global = lambda mpi_col, j: mpi_col + j * mpi_nbr_cols
-
-        j_vals_i_global = np.empty(dat_len, dtype=np.int64)
-        nbr_pvals = 0
-        for mpi_col in xrange(mpi_nbr_cols):
-            local_range = range(nbr_pvals, nbr_pvals + dat_len_vec[mpi_col + 1])
-            j_vals_i_global[local_range] = [local_to_global(mpi_col, j_vals_i[col]) for col in local_range]
-            nbr_pvals += dat_len_vec[mpi_col + 1]
-
         # Sort, adjust, cutoff and print p values.
 
+        nbr_pvals = np.sum(dat_len_vec[1 : mpi_nbr_cols + 1])
         jsorted = np.argsort(d2_pvals_i[:nbr_pvals])
         d2_adj_pvals_i = saftstats.BH_array(d2_pvals_i[jsorted])
         nbr_pvals = min(args.showmax, nbr_pvals)
@@ -236,7 +231,7 @@ for i in xrange(inp_len):
         if len(jrange) > 0:
             for j in jrange:
                 js = jsorted[j]
-                jg = j_vals_i_global[js]
+                jg = j_vals_i[js]
                 print "  Hit:", dat_desc[jg], "D2:", "{:d}".format(long(d2_vals_i[js])), "adj.p.val:", "{:11.5e}".format(d2_adj_pvals_i[j]), "p.val:", "{:11.5e}".format(d2_pvals_i[js])
         else:
             print "No hit found"
