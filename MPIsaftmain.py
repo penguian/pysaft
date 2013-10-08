@@ -16,6 +16,7 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 
+from __future__ import print_function
 import argparse
 import numpy as np
 import MPIsaftsparse as saftsparse
@@ -65,7 +66,7 @@ if my_mpi_rank != 0:
     my_mpi_col = (my_mpi_rank - 1) %  mpi_nbr_cols
 
 if args.timing and my_mpi_rank == 0:
-    print "Argument parse time ==", "{:f}".format( time() - tick )
+    print("Argument parse time ==", "{:f}".format( time() - tick ))
 
 # Parse input and database sequences and build frequency matrices.
 
@@ -87,7 +88,7 @@ else:
     dat_len = dat_freq.shape[1]
 
 if args.timing and my_mpi_rank == 1:
-    print "Sequence parse time ==", "{:f}".format( time() - tick )
+    print("Sequence parse time ==", "{:f}".format( time() - tick ))
 
 if my_mpi_rank != 0:
 
@@ -98,7 +99,7 @@ if my_mpi_rank != 0:
     d2_vals = np.asarray((inp_freq.T * dat_freq).todense())
 
     if args.timing and my_mpi_rank == 1:
-        print "Calculate d2   time ==", "{:f}".format( time() - tick )
+        print("Calculate d2   time ==", "{:f}".format( time() - tick ))
 
     # Calculate theroretical means and vars.
 
@@ -113,7 +114,7 @@ if my_mpi_rank != 0:
                           for j in xrange(dat_len)] for i in xrange(inp_len)])
 
     if args.timing and my_mpi_rank == 1:
-        print "Means and vars time ==", "{:f}".format( time() - tick )
+        print("Means and vars time ==", "{:f}".format( time() - tick ))
 
     # Calculate p values.
 
@@ -122,11 +123,18 @@ if my_mpi_rank != 0:
 
     d2_pvals = saftstats.pgamma_m_v(d2_vals, d2_means, d2_vars)
 
+    # Determine the number of p values within this process to send back to the scribe process.
+
+    nbr_pvals = min(args.showmax, d2_pvals.shape[1])
+
     if args.timing and my_mpi_rank == 1:
-        print "Calc p-values  time ==", "{:f}".format( time() - tick )
+        print("Calc p-values  time ==", "{:f}".format( time() - tick ))
 
 
 # Create a communicator for each process row
+
+if args.timing and my_mpi_rank == 0:
+    tick = time()
 
 world_group = comm.Get_group()
 row_groups = []
@@ -149,6 +157,9 @@ for mpi_row in xrange(mpi_nbr_rows):
         mpi_row_group = world_group.Incl([0]) #MPI.GROUP_EMPTY
         mpi_row_comm = comm.Create(mpi_row_group)
 
+if args.timing and my_mpi_rank == 0:
+    print("Communicator   time ==", "{:f}".format( time() - tick ))
+
 # Print p values.
 
 if args.timing and my_mpi_rank == 0:
@@ -161,11 +172,21 @@ if my_mpi_rank == 0:
     j_vals_i   = np.empty(dat_len, dtype=np.int64)
     d2_vals_i  = np.empty(dat_len, dtype=np.double)
     d2_pvals_i = np.empty(dat_len, dtype=np.double)
+else:
+    # Define the local to global mapping of column indices to use to send to the scribe process.
+
+    local_to_global = lambda j: my_mpi_col + j * mpi_nbr_cols
+
+# Create an array to use for the number of p values sent from each work process to the scribe.
+
+dat_len_vec = np.zeros(mpi_nbr_cols + 1, dtype=np.int64)
+
+# Print the results of each query, one at a time.
 
 for i in xrange(inp_len):
 
     if my_mpi_rank == 0:
-        print "Query:", inp_desc[i], "program: saftn word size:", args.wordsize
+        print("Query:", inp_desc[i], "program: saftn word size:", args.wordsize)
 
     # Sort and cut off p values locally.
 
@@ -182,17 +203,14 @@ for i in xrange(inp_len):
 
         # Cut off by number of p values within this process.
 
-        nbr_pvals = min(args.showmax, d2_pvals_i.shape[0])
+        j_vals_i = jsorted[ : nbr_pvals]
 
         # Store the global indices resulting from the sorting.
 
-        local_to_global = lambda j: my_mpi_col + j * mpi_nbr_cols
-        j_vals_i = jsorted[:nbr_pvals]
         j_vals_i_global = np.array(map(local_to_global, j_vals_i), dtype=np.int64)
 
-    # Get database lengths.
+    # Get number of p values from each worker process.
 
-    dat_len_vec = np.zeros(mpi_nbr_cols + 1, dtype=np.int64)
     if my_mpi_rank == 0:
         dat_len_val = np.array(0, dtype=np.int64)
         mpi_row_comm = row_comms[i % mpi_nbr_rows]
@@ -224,7 +242,7 @@ for i in xrange(inp_len):
         # Sort, adjust, cutoff and print p values.
 
         nbr_pvals = np.sum(dat_len_vec[1 : mpi_nbr_cols + 1])
-        jsorted = np.argsort(d2_pvals_i[:nbr_pvals])
+        jsorted = np.argsort(d2_pvals_i[ : nbr_pvals])
         d2_adj_pvals_i = saftstats.BH_array(d2_pvals_i[jsorted])
         nbr_pvals = min(args.showmax, nbr_pvals)
         jrange = [j for j in xrange(nbr_pvals) if d2_adj_pvals_i[j] < args.pmax]
@@ -232,9 +250,12 @@ for i in xrange(inp_len):
             for j in jrange:
                 js = jsorted[j]
                 jg = j_vals_i[js]
-                print "  Hit:", dat_desc[jg], "D2:", "{:d}".format(long(d2_vals_i[js])), "adj.p.val:", "{:11.5e}".format(d2_adj_pvals_i[j]), "p.val:", "{:11.5e}".format(d2_pvals_i[js])
+                print("  Hit:", dat_desc[jg],
+                      "D2:", "{:d}".format(long(d2_vals_i[js])),
+                      "adj.p.val:", "{:11.5e}".format(d2_adj_pvals_i[j]),
+                      "p.val:", "{:11.5e}".format(d2_pvals_i[js]))
         else:
-            print "No hit found"
+            print("No hit found")
 
 if args.timing and my_mpi_rank == 0:
-    print "Print p-values time ==", "{:f}".format( time() - tick )
+    print("Print p-values time ==", "{:f}".format( time() - tick ))
