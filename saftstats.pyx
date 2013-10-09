@@ -7,12 +7,12 @@
  * it under the terms of the GNU General Public License as published by
  * the Free Software Foundation, either version 3 of the License, or
  * (at your option) any later version.
- *                                                                       
+ *
  * This program is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
- *                                                                       
+ *
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
@@ -38,7 +38,7 @@ cdef double sum_freq_pow (object frequencies,
  * FIXME There's quite a bit of optimisation and checking for numeric stability
  * that could be done here
 """
- 
+
 cdef class stats_context:
     cdef double p_2_k
     cdef double sum_var_Yu
@@ -48,7 +48,7 @@ cdef class stats_context:
     cdef double cov_ac2
     cdef unsigned int word_size
     cdef unsigned int unif
-    
+
     def __cinit__(self, word_size, letters_frequencies):
 
         cdef int          n_letters = len(letters_frequencies)
@@ -128,7 +128,7 @@ cdef class stats_context:
 cpdef double mean (stats_context context,
                    unsigned int  query_size,
                    unsigned int  subject_size):
-    
+
     cdef double m = query_size
     cdef double n = subject_size
     cdef double mn = m * n
@@ -142,7 +142,7 @@ cpdef double var (stats_context context,
     cdef double n = subject_size
     cdef double mn = m * n
     cdef int    k = context.word_size
-       
+
     cdef double cov_crab = (n + m - 4 * k + 2) * context.cov_crab
 
     if (context.word_size == 1):
@@ -153,10 +153,10 @@ cpdef double var (stats_context context,
 def pgamma_m_v (d2, mean, var):
     scale = var / mean
     shape = mean / scale
- 
+
     cdef unsigned int rows = d2.shape[0]
     cdef unsigned int cols = d2.shape[1]
-    
+
     result = np.empty(d2.shape)
     cdef unsigned int i
     cdef unsigned int j
@@ -169,14 +169,16 @@ def pgamma_m_v (d2, mean, var):
  * Benjamini and Hochberg method
  * p_values are expected to be already sorted in increasing order
 """
-def BH_array (p_values):
+def BH_array (p_values, tot_n_p_values=0):
     cdef int i
 
     result = np.empty(p_values.shape)
     n_p_values = p_values.shape[0]
-    result[n_p_values - 1] = p_values[n_p_values - 1]
-    for i in xrange(n_p_values - 2, -1, -1):
-        result[i] = (p_values[i] * n_p_values) / (i + 1)
-        if (result[i] > result[i + 1]):
-            result[i] = result[i + 1];
+    if  tot_n_p_values < n_p_values:
+        tot_n_p_values = n_p_values
+    for i in xrange(n_p_values - 1, -1, -1):
+        result[i] = (p_values[i] * tot_n_p_values) / (i + 1)
+        if  i < n_p_values - 1:
+            if  result[i] > result[i + 1]:
+                result[i] = result[i + 1];
     return result
