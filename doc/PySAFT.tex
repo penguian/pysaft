@@ -1,0 +1,222 @@
+\documentclass[11pt]{report}
+\usepackage[utf8]{inputenc}
+\usepackage{amssymb,amsmath,amsthm}
+\usepackage{graphicx}
+\usepackage{algorithm2e}
+
+% Title Page
+\title{PySAFT and MPIPySAFT: fast approaches to scaling up SAFT}
+\author{Paul Leopardi}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+This document describes the design of the PySAFT and MPIPySAFT prototypes.
+\end{abstract}
+\chapter{Introduction -- SAFT}
+The SAFT program, designed and implemented by Sylvain For\^et,
+produces alignment-free statistics for pairs of biological sequences,
+in particular, the D2 statistic and its corresponding p-value, given certain assumptions.
+Essentially, SAFT operates by taking two files, each containing a list of sequences: 
+a \emph{query file} and a \emph{database file}; 
+and for each query sequence, computes the D2 statistic and p-value corresponding to a pairing
+with each database sequence. 
+It does this by coding each query sequence and each database sequence one at a time in a hash table. 
+In turn, this means that the entire list of database sequences is kept in memory,
+to be used for each query sequence.
+
+The design of PySAFT came about after I had a discussion with Sylvain For\^et on ways of speeding up SAFT.
+I realised that since the D2 statistic is an inner product between to vectors of k-mer frequencies,
+the whole collection of D2 statistics for each (query, database) pair can be computed as a matrix multiplication.
+The following chapters describe the design of PySAFT and its parallelized version, MPIPySAFT.
+\chapter{PySAFT}
+\section{Description of the Code}
+
+PySAFT uses two SciPy sparse (\verb!csr!) matrices to store the word counts for the 
+query sequences and the database sequences, and then uses SciPy sparse 
+matrix multiplication to calculate D2. 
+So far only SAFTN (DNA alphabet) with the D2 statistic has been implemented. 
+
+The pseudocode for PySAFT is listed as Algorithm \ref{pysaft-algorithm}.
+\begin{algorithm}
+\KwData{arguments, FASTA file of query sequences, FASTA file of database sequences
+}
+\KwResult{A report containing, for each query sequence: query sequence name, 
+and a list of database sequences, each with corresponding D2 value, p value, and 
+Benjamini-Hochberg adjusted p value,
+in order of increasing adjusted p value, and cut off according to arguments
+} 
+Parse arguments\;
+Parse input and database sequences and build frequency matrices\;
+Calculate d2 by matrix multiplication\;
+Calculate theoretical means and variances\;
+Calculate p values\;
+\For{each query}{
+    Sort database sequences by p value\;
+    Adjust p values using Benjamini-Hochberg \;
+    Cut off database sequences by number of p values and by maximum adjusted p value\;
+    Print remaining database sequence names  and corresponding D2 values, p values and adjusted p values\;
+}
+\caption{PySAFT pseudocode.}
+\label{pysaft-algorithm}
+\end{algorithm}
+
+\chapter{MPIPySAFT}
+\section{Description of the Code}
+
+MPIPySAFT is an MPI implementation of PySAFT, using MPI4Py. It uses two types 
+of process, one scribe process, and a rectangular array of worker processes.
+The worker processes are arranged by process row and process column. 
+The total number of processes is controlled by the -n parameter of mpiexec. 
+The number of process rows is controlled by the \verb!--mpi_rows! parameter of MPIpysaftn.py.
+
+Invocation looks like:
+\begin{verbatim}
+mpiexec -n $n ./MPIpysaftn.py --input $i --database $d \
+ --mpi_rows $r --wordsize $w --pmax $p --timing
+\end{verbatim}
+The \verb!--timing! parameter switches on debug timing.
+
+The process rows are parallel with respect to the query file and the process 
+columns are parallel with respect to the database file. 
+Each worker process addresses a unique subset of pairs of sequences, $(q,d)$, where $q$ is a sequence 
+from the query file and $d$ is a sequence from the database file.
+
+The pseudocode for MPIPySAFT is listed as Algorithm \ref{mpipysaft-algorithm}.
+
+\begin{algorithm}
+\KwData{arguments, FASTA file of query sequences, FASTA file of database sequences
+}
+\KwResult{A report containing, for each query sequence: query sequence name, 
+and a list of database sequences, each with corresponding D2 value, p value, and 
+Benjamini-Hochberg adjusted p value,
+in order of increasing adjusted p value, and cut off according to arguments
+} 
+Parse arguments\;
+Establish which process MPI thinks this is\;
+Parse query and database sequences and build frequency matrices\;
+Calculate d2 by matrix multiplication\;
+Calculate theoretical means and variances\;
+Calculate p values\;
+\If{this is a worker process}{
+    Determine the number of p values within this process to
+      send back to the scribe process\;
+}
+Create a communicator for each process row\;
+Get the number of p values from each worker process in 
+  process row 0\;
+\For{each query}{
+\If{this is a worker process}{
+    Sort database sequences by p value within this process\;
+    Cut off database sequences by maximum number within this process\;
+    Store the global database sequence indices resulting from the sorting\;
+}
+    Gather the global database sequence indices, and corresponding D2 values and p values 
+      into the scribe process\;
+
+\If{this is the scribe process}{
+    Sort database sequences by p value\;
+    Adjust p values using approximate Benjamini-Hochberg \;
+    Cut off database sequences by number of p values and by maximum adjusted p value\;
+    Print remaining database sequence names  and corresponding D2 values, p values and adjusted p values\;
+}
+}
+\caption{MPIPySAFT pseudocode.}
+\label{mpipysaft-algorithm}
+\end{algorithm}
+
+The scribe process is responsible for printing the result. In particular, for 
+each query, the scribe process sorts the subset of p values returned from the 
+relevant process row, and performs an approximate Benjamini-Hochberg 
+adjustment on the p-values. The adjustment is approximate in the sense that, 
+because it does not use \emph{all} of the p-values, it is impossible to ensure that 
+the largest adjusted p-value contained in the subset is not larger than the 
+smallest adjusted p-value not contained in the subset.
+
+\section{Tests and Results}
+
+Tests were conducted on the NCI Raijin cluster with:
+query file: 
+\newline
+\verb!amel_OGSv1.0_transcript.fa! (10157 sequences)
+database file: 
+\newline
+\verb!Homo_sapiens.GRCh37.72.cdna.all.fa! (192628 sequences).
+
+Walltimes (P = total processes, including scribe, R = number of process rows):
+
+\begin{center}
+\begin{tabular}{|rrc|}
+\hline
+P  &R &Walltime (min:sec) \\
+\hline
+31 &1 &9:01 \\
+31 &2 &7:41 \\
+31 &3 &7:09 \\
+63 &1 &8:14 \\
+63 &2 &5:13 \\
+64 &3 &4:56 \\
+\hline
+\end{tabular} 
+\end{center}
+
+Breakdown for $P=64, R=2,$ (seconds):
+
+\begin{center}
+\begin{tabular}{|l|rr|}
+\hline
+               &scribe  &worker 1 \\
+\hline
+Argument parse &  0.001 &  0.002 \\
+Sequence parse &  7.063 & 17.412 \\
+Calculate d2   &        & 20.942 \\
+Means and vars &        & 53.074 \\
+Calc p-values  &        & 86.797 \\
+Communicator   &178.731 &  7.570 \\
+Get nbr p-vals &  0.205 &  0.003 \\
+Print p-values &117.090 &115.394 \\
+\hline
+\end{tabular} 
+\end{center}
+
+The 178+ seconds for the communicator time for the scribe process likely 
+consists mostly of time waiting for the worker processes to complete the 
+previous steps and synchronize.
+
+There is a tradeoff between time spent up to the point of calculating p-values 
+vs time spent printing p-values. Having more process columns speeds up the 
+first steps at the cost of slowing down the printing step. This is because, 
+when there are more process columns, each worker process has less database 
+entries to deal with, but the scribe process has to deal with a larger subset 
+of p-values, coming from the extra process columns in a row.
+
+Job stats for $P=64, R=2$:
+
+\begin{verbatim}
+Service Units: 5.56
+NCPUs Requested: 64             NCPUs Used: 64
+                                CPU Time Used: 01:14:45
+Memory Requested: 256000mb      Memory Used: 41178mb
+                                Vmem Used: 52868mb
+Walltime requested: 00:30:00    Walltime Used: 00:05:13
+jobfs request: 400mb            jobfs used: 4mb
+\end{verbatim}
+
+Job stats for $P=31, R=2$:
+
+\begin{verbatim}
+Service Units: 4.10
+NCPUs Requested: 32             NCPUs Used: 32
+                                CPU Time Used: 01:50:42
+Memory Requested: 256000mb      Memory Used: 82869mb
+                                Vmem Used: 94649mb
+Walltime requested: 00:30:00    Walltime Used: 00:07:41
+jobfs request: 200mb            jobfs used: 2mb
+\end{verbatim}
+
+
+\bibliographystyle{plain}
+%\bibliography{bib}
+
+\end{document}          
