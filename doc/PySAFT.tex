@@ -2,7 +2,7 @@
 \usepackage[utf8]{inputenc}
 \usepackage{amssymb,amsmath,amsthm}
 \usepackage{graphicx}
-\usepackage{algorithm2e}
+\usepackage[boxed]{algorithm2e}
 
 % Title Page
 \title{PySAFT and MPIPySAFT: fast approaches to scaling up SAFT}
@@ -39,8 +39,9 @@ matrix multiplication to calculate D2.
 So far only SAFTN (DNA alphabet) with the D2 statistic has been implemented. 
 
 The pseudocode for PySAFT is listed as Algorithm \ref{pysaft-algorithm}.
+
 \begin{algorithm}
-\KwData{arguments, FASTA file of query sequences, FASTA file of database sequences
+\KwData{Arguments, FASTA file of query sequences, FASTA file of database sequences
 }
 \KwResult{A report containing, for each query sequence: query sequence name, 
 and a list of database sequences, each with corresponding D2 value, p value, and 
@@ -61,6 +62,61 @@ Calculate p values\;
 \caption{PySAFT pseudocode.}
 \label{pysaft-algorithm}
 \end{algorithm}
+\subsection{Key data structures}
+\paragraph{Sparse frequency matrix.}
+The main data structure used by PySAFT is the \emph{sparse frequency matrix}.
+This is a matrix each of whose columns is a \emph{frequency vector} for a sequence.
+For a given word length $k,$ a given ordered alphabet of size $d,$ 
+and a sequence $s$ of letters in that alphabet, with sequence length $n,$
+a frequency vector is a vector indexed by the lexicographical ordering of all of the $d^k$ possible
+words in the alphabet, each entry of which is the number of occurrences of the corresponding word
+in the string.
+
+Since there are $n-k+1$ overlapping words in a string of length $n,$
+for a fixed $n,$ as $k$ increases, the number of non-zero entries in the frequency vector for a word
+of length $n$ stays bounded.
+Also, in applications, a list of sequences taken from the same underlying text (e.g. a genome)
+would be expected to yield a list of frequency vectors with similar sets of non-zero indices.
+This is the heuristic justification for using a sparse matrix for the frequency matrix.
+
+The sparse frequency matrix in PySAFT is implemented as a SciPy sparse csr (Compressed Sparse Row) matrix.
+This was chosen because the csr format fits the anticipated sparsity pattern, and because the 
+\newline \verb!scipy.sparse! module includes all of the functionality needed to construct these
+matrices and perform arithmetic on them.
+The module \verb!saftsparse!, coded in Cython, contains the functions used to create each of the query
+and database sparse frequency matrices.
+The main function of this module is \verb!build_dna_sparse_frequency_matrix!, whose entire code is:
+\begin{verbatim}
+def build_dna_sparse_frequency_matrix(
+    file_name, word_len, masked=True):
+    freq_list, size_list, desc_list = build_dna_frequency_lists(
+                                      file_name, word_len, masked)
+    return ss.hstack(freq_list ,format="csr"), size_list, desc_list
+\end{verbatim}
+That is, given a file name, a word length, and the Boolean parameter \verb!masked!
+to indicate whether to use masking or not,
+the function calls \newline 
+\verb!build_dna_frequency_lists! to create a list of frequency vectors 
+\newline (\verb!freq_list!)
+and the corresponding lists of sequence lengths (\verb!size_list!) and sequence descriptions
+(\verb!desc_list!).
+The function then calls the 
+\newline \verb!scipy.sparse! function \verb!hstack! to create
+a sparse frequency matrix from \verb!freq_list!, and returns it along with 
+\verb!size_list! and \verb!desc_list!.
+\paragraph{FASTA files and sequences.}
+PySAFT uses the module \verb!SeqIO! from BioPython to parse the query and database files in
+FASTA format.
+The \verb!SeqIO! function \verb!parse! returns an iterator 
+that produces records that are BioPython \verb!SeqRecord! objects.
+In PySAFT, this function is used by the 
+\newline \verb!saftsparse! function \verb!build_dna_frequency_lists! 
+to obtain the sequence object, length and description of each sequence in a FASTA file.
+A sequence object is BioPython \verb!Seq! object.
+Sequence objects are only used within 
+\newline \verb!build_dna_frequency_lists! to perform masking,
+if necessary.
+Otherwise, the functions in PySAFT represent sequences as character strings (\verb!char *! in Cython).
 
 \chapter{MPIPySAFT}
 \section{Description of the Code}
@@ -86,7 +142,7 @@ from the query file and $d$ is a sequence from the database file.
 The pseudocode for MPIPySAFT is listed as Algorithm \ref{mpipysaft-algorithm}.
 
 \begin{algorithm}
-\KwData{arguments, FASTA file of query sequences, FASTA file of database sequences
+\KwData{Arguments, FASTA file of query sequences, FASTA file of database sequences
 }
 \KwResult{A report containing, for each query sequence: query sequence name, 
 and a list of database sequences, each with corresponding D2 value, p value, and 
@@ -190,7 +246,7 @@ first steps at the cost of slowing down the printing step. This is because,
 when there are more process columns, each worker process has less database 
 entries to deal with, but the scribe process has to deal with a larger subset 
 of p-values, coming from the extra process columns in a row.
-
+\newpage
 Job stats for $P=64, R=2$:
 
 \begin{verbatim}
