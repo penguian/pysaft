@@ -86,31 +86,35 @@ def build_dna_desc_list(file_name):
         desc_list.append(description)
     return desc_list
 
-def gen_dna_frequency(file_name, unsigned int word_len, masked=True):
+def gen_dna_frequency(file_name,
+                      unsigned int word_len,
+                      start=0,
+                      step=1,
+                      getdesc=True,
+                      masked=True):
     cdef char* alphabet = dna_alphabet
     cdef unsigned int alpha = len(alphabet)
     alpha_dict = {}
     for k in xrange(alpha):
         alpha_dict[<char>(alphabet[k])] = k
     cdef char* seq
+    cdef unsigned int recnbr = 0
     with open(file_name) as file_handle:
         for rec in SeqIO.parse(file_handle,"fasta"):
-            recseq = str(rec.seq) if masked else str(rec.seq).upper()
-            seq = recseq
-            frequency, nbr_words = build_frequency_vector(alpha_dict, seq, word_len)
-            yield frequency, nbr_words, rec.description
+            if recnbr % step == start:
+                recseq = str(rec.seq) if masked else str(rec.seq).upper()
+                seq = recseq
+                frequency, nbr_words = build_frequency_vector(alpha_dict, seq, word_len)
+                description = rec.description if getdesc else ""
+                yield frequency, nbr_words, description
+            recnbr += 1
 
-def build_dna_frequency_lists(file_name, unsigned int word_len, masked=True):
-    freq_list = []
-    size_list = []
-    desc_list = []
-    for frequency, nbr_words, description in gen_dna_frequency(file_name, word_len, masked):
-        freq_list.append(frequency)
-        size_list.append(nbr_words)
-        desc_list.append(description)
-    return freq_list, size_list, desc_list
-
-def build_dna_sparse_frequency_matrix(file_name, word_len, masked=True):
+def build_dna_sparse_frequency_matrix(file_name,
+                                      word_len,
+                                      start=0,
+                                      step=1,
+                                      getdesc=True,
+                                      masked=True):
     size_list = []
     desc_list = []
     array_len = 2
@@ -119,9 +123,16 @@ def build_dna_sparse_frequency_matrix(file_name, word_len, masked=True):
     data = np.empty((array_len), dtype=np.uint32)
     nnz = 0
     nbr_cols = 0
-    for frequency, nbr_words, description in gen_dna_frequency(file_name, word_len, masked):
+    for frequency, nbr_words, description in gen_dna_frequency(
+            file_name,
+            word_len,
+            start=start,
+            step=step,
+            getdesc=getdesc,
+            masked=masked):
         size_list.append(nbr_words)
-        desc_list.append(description)
+        if getdesc:
+            desc_list.append(description)
         next_nnz = nnz + frequency.nnz
         if array_len < next_nnz:
             array_len = (next_nnz * 3) // 2
@@ -133,6 +144,6 @@ def build_dna_sparse_frequency_matrix(file_name, word_len, masked=True):
         data[nnz:next_nnz] = frequency.data
         nnz = next_nnz
         nbr_cols += 1
-
     shape = (frequency.shape[0], nbr_cols)
     return ss.csr_matrix((data,(rows, cols)), shape=shape), size_list, desc_list
+    
