@@ -6,12 +6,12 @@
  * it under the terms of the GNU General Public License as published by
  * the Free Software Foundation, either version 3 of the License, or
  * (at your option) any later version.
- *                                                                       
+ *
  * This program is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
- *                                                                       
+ *
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
@@ -22,7 +22,7 @@ from Bio import SeqIO
 from time import time
 
 dna_alphabet = "ACGT"
-     
+
 cdef int restart_pos(alpha_dict, char* seq, unsigned int word_len, unsigned int start_pos):
     cdef unsigned int seq_len = len(seq)
     cdef unsigned int pos = start_pos
@@ -35,14 +35,14 @@ cdef int restart_pos(alpha_dict, char* seq, unsigned int word_len, unsigned int 
         if seq[pos] in alpha_dict:
             return result
     return -1
-   
+
 cdef unsigned int word_to_state(alpha_dict, char* seq, int start_pos, int end_pos):
     cdef unsigned int alpha = len(alpha_dict)
     cdef unsigned int result = alpha_dict[seq[start_pos]]
     cdef int pos
     for pos in xrange(start_pos + 1, end_pos):
         result = result * alpha + alpha_dict[seq[pos]]
-    return result    
+    return result
 
 cdef build_frequency_vector(alpha_dict, char* seq, unsigned int word_len):
     cdef unsigned int alpha = len(alpha_dict)
@@ -61,40 +61,78 @@ cdef build_frequency_vector(alpha_dict, char* seq, unsigned int word_len):
                 row = word_to_state(alpha_dict, seq, start_pos, end_pos)
             else:
                 row = (row * alpha + alpha_dict[end_char]) % freq_len
-            rows[word_nbr] = row    
+            rows[word_nbr] = row
             restarted = False
             start_pos += 1
             word_nbr += 1
-        else:   
+        else:
             start_pos = restart_pos(alpha_dict, seq, word_len, end_pos)
             restarted = True
         end_pos = start_pos + word_len
-    rows = rows[: word_nbr]    
-    cols = np.zeros((word_nbr),dtype=np.uint8)
-    data = np.ones(word_nbr)
+    rows = rows[: word_nbr]
+    cols = np.zeros((word_nbr), dtype=np.intc)
+    data = np.ones(word_nbr, dtype=np.uint32)
     frequency = ss.coo_matrix((data,(rows, cols)), shape=(freq_len, 1))
     return frequency, word_nbr
 
-def build_dna_frequency_lists(file_name, unsigned int word_len, masked=True):
+def gen_dna_desc(file_name):
+    with open(file_name) as file_handle:
+        for rec in SeqIO.parse(file_handle,"fasta"):
+            yield rec.description
+
+def build_dna_desc_list(file_name):
+    desc_list = []
+    for description in gen_dna_desc(file_name):
+        desc_list.append(description)
+    return desc_list
+
+def gen_dna_frequency(file_name, unsigned int word_len, masked=True):
     cdef char* alphabet = dna_alphabet
     cdef unsigned int alpha = len(alphabet)
     alpha_dict = {}
     for k in xrange(alpha):
         alpha_dict[<char>(alphabet[k])] = k
-    freq_list = []
-    size_list = []
-    desc_list = []
     cdef char* seq
     with open(file_name) as file_handle:
         for rec in SeqIO.parse(file_handle,"fasta"):
             recseq = str(rec.seq) if masked else str(rec.seq).upper()
             seq = recseq
             frequency, nbr_words = build_frequency_vector(alpha_dict, seq, word_len)
-            freq_list.append(frequency)
-            size_list.append(nbr_words)
-            desc_list.append(rec.description)
+            yield frequency, nbr_words, rec.description
+
+def build_dna_frequency_lists(file_name, unsigned int word_len, masked=True):
+    freq_list = []
+    size_list = []
+    desc_list = []
+    for frequency, nbr_words, description in gen_dna_frequency(file_name, word_len, masked):
+        freq_list.append(frequency)
+        size_list.append(nbr_words)
+        desc_list.append(description)
     return freq_list, size_list, desc_list
 
 def build_dna_sparse_frequency_matrix(file_name, word_len, masked=True):
-    freq_list, size_list, desc_list = build_dna_frequency_lists(file_name, word_len, masked)
-    return ss.hstack(freq_list ,format="csr"), size_list, desc_list
+    size_list = []
+    desc_list = []
+    array_len = 2
+    rows = np.empty((array_len), dtype=np.intc)
+    cols = np.empty((array_len), dtype=np.intc)
+    data = np.empty((array_len), dtype=np.uint32)
+    nnz = 0
+    nbr_cols = 0
+    for frequency, nbr_words, description in gen_dna_frequency(file_name, word_len, masked):
+        size_list.append(nbr_words)
+        desc_list.append(description)
+        next_nnz = nnz + frequency.nnz
+        if array_len < next_nnz:
+            array_len = (next_nnz * 3) // 2
+            rows.resize((array_len))
+            cols.resize((array_len))
+            data.resize((array_len))
+        rows[nnz:next_nnz] = frequency.row
+        cols[nnz:next_nnz] = nbr_cols
+        data[nnz:next_nnz] = frequency.data
+        nnz = next_nnz
+        nbr_cols += 1
+
+    shape = (frequency.shape[0], nbr_cols)
+    return ss.csr_matrix((data,(rows, cols)), shape=shape), size_list, desc_list
