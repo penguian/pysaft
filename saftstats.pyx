@@ -150,7 +150,7 @@ cpdef double var (stats_context context,
 
     return mn * (context.sum_var_Yu + cov_crab + context.cov_diag + context.cov_ac1 + context.cov_ac2)
 
-def pgamma_m_v (d2, mean, var):
+def pgamma_m_v_matrix (d2, mean, var):
     scale = var / mean
     shape = mean / scale
 
@@ -165,6 +165,29 @@ def pgamma_m_v (d2, mean, var):
             result[i, j] = gsl_cdf_gamma_Q (d2[i, j], shape[i, j], scale[i, j])
     return result
 
+def pgamma_m_v_vector (d2, mean, var):
+    scale = var / mean
+    shape = mean / scale
+
+    cdef unsigned int nbr_pvals = d2.shape[0]
+
+    result = np.empty(d2.shape)
+    cdef unsigned int i
+    for i in xrange(nbr_pvals):
+        result[i] = gsl_cdf_gamma_Q (d2[i], shape[i], scale[i])
+    return result
+
+def pgamma_m_v (d2, mean, var):
+    scale = var / mean
+    shape = mean / scale
+
+    it = np.nditer(
+        [d2, shape, scale, None],
+        op_flags=[['readonly'],['readonly'],['readonly'],['writeonly', 'allocate']])
+    for this_d2, this_shape, this_scale, this_result in it:
+        this_result[...] = gsl_cdf_gamma_Q (this_d2, this_shape, this_scale)
+    return it.operands[3]
+
 """
  * Benjamini and Hochberg method
  * p_values are expected to be already sorted in increasing order
@@ -178,7 +201,7 @@ def BH_array (p_values, tot_n_p_values=0):
         tot_n_p_values = n_p_values
     for i in xrange(n_p_values - 1, -1, -1):
         result[i] = (p_values[i] * tot_n_p_values) / (i + 1)
-        if  i < n_p_values - 1:
+        if i < n_p_values - 1:
             if  result[i] > result[i + 1]:
                 result[i] = result[i + 1];
     return result

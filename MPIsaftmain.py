@@ -68,25 +68,15 @@ if my_mpi_rank != 0:
 if args.timing and my_mpi_rank in {0,1}:
     print("Process", my_mpi_rank, ":", "Argument parse time ==", "{:f}".format( time() - tick ))
 
-# Parse input and database sequences and build frequency matrices.
+# Parse database sequences and build frequency matrix.
 
 if args.timing and my_mpi_rank in {0,1}:
     tick = time()
 
 if my_mpi_rank == 0:
-    inp_desc = saftsparse.build_dna_desc_list(args.input)
-    inp_len = len(inp_desc)
     dat_desc = saftsparse.build_dna_desc_list(args.database)
     dat_len = len(dat_desc)
 else:
-    inp_freq, inp_size, inp_desc = saftsparse.build_dna_sparse_frequency_matrix(
-        args.input,
-        args.wordsize,
-        my_mpi_row,
-        mpi_nbr_rows,
-        getdesc=False)
-    inp_len = inp_freq.shape[1]
-
     dat_freq, dat_size, dat_desc = saftsparse.build_dna_sparse_frequency_matrix(
         args.database,
         args.wordsize,
@@ -96,47 +86,7 @@ else:
     dat_len = dat_freq.shape[1]
 
 if args.timing and my_mpi_rank in {0,1}:
-    print("Process", my_mpi_rank, ":", "Sequence parse time ==", "{:f}".format( time() - tick ))
-
-if my_mpi_rank != 0:
-
-    # Calculate d2.
-
-    if args.timing and my_mpi_rank in {0,1}:
-        tick = time()
-    d2_vals = np.asarray((inp_freq.T * dat_freq).todense())
-
-    if args.timing and my_mpi_rank in {0,1}:
-        print("Process", my_mpi_rank, ":", "Calculate d2   time ==", "{:f}".format( time() - tick ))
-
-    # Calculate the\cite{Dil74}.oretical means and vars.
-
-    if args.timing and my_mpi_rank in {0,1}:
-        tick = time()
-
-    context = saftstats.stats_context(args.wordsize, alpha_freq)
-
-    d2_means = np.array([[saftstats.mean(context, inp_size[i] + args.wordsize - 1, dat_size[j] + args.wordsize - 1)
-                          for j in xrange(dat_len)] for i in xrange(inp_len)])
-    d2_vars  = np.array([[saftstats.var(context, inp_size[i] + args.wordsize - 1, dat_size[j] + args.wordsize - 1)
-                          for j in xrange(dat_len)] for i in xrange(inp_len)])
-
-    if args.timing and my_mpi_rank in {0,1}:
-        print("Process", my_mpi_rank, ":", "Means and vars time ==", "{:f}".format( time() - tick ))
-
-    # Calculate p values.
-
-    if args.timing and my_mpi_rank in {0,1}:
-        tick = time()
-
-    d2_pvals = saftstats.pgamma_m_v(d2_vals, d2_means, d2_vars)
-
-    # Determine the number of p values within this process to send back to the scribe process.
-
-    nbr_pvals = min(args.showmax, d2_pvals.shape[1])
-
-    if args.timing and my_mpi_rank in {0,1}:
-        print("Process", my_mpi_rank, ":", "Calc p-values  time ==", "{:f}".format( time() - tick ))
+    print("Process", my_mpi_rank, ":", "Database parse time ==", "{:f}".format( time() - tick ))
 
 # Create a communicator for each process row.
 
@@ -167,13 +117,20 @@ for mpi_row in xrange(mpi_nbr_rows):
 if args.timing and my_mpi_rank in {0,1}:
     print("Process", my_mpi_rank, ":", "Communicator   time ==", "{:f}".format( time() - tick ))
 
-# Get the number of p values from each worker process in process row 0.
+# Get the number of database sequences from each worker process in process row 0.
 # This number should be the same for all process rows.
 
 if args.timing and my_mpi_rank in {0,1}:
     tick = time()
 
 dat_len_vec = np.zeros(mpi_nbr_cols + 1, dtype=np.int64)
+
+if my_mpi_rank != 0:
+
+    # Determine the number of p values within this process to send back to the scribe process.
+
+    nbr_pvals = min(args.showmax, dat_len)
+
 if my_mpi_rank == 0:
     dat_len_val = np.array(0, dtype=np.int64)
     mpi_row_comm = row_comms[0]
@@ -188,85 +145,140 @@ elif my_mpi_row == 0:
     mpi_row_comm.Gather([dat_len_val, MPI.LONG], [dat_len_vec, MPI.LONG])
 
 if args.timing and my_mpi_rank in {0,1}:
-    print("Process", my_mpi_rank, ":", "Get nbr p-vals time ==", "{:f}".format( time() - tick ))
+    print("Process", my_mpi_rank, ":", "Get nbr seqs time   ==", "{:f}".format( time() - tick ))
 
-# Print p values.
+if my_mpi_rank != 0:
+    if args.timing and my_mpi_rank == 1:
+        d2_time = 0
+        mv_time = 0
+        pv_time = 0
+        ad_time = 0
 
-if args.timing and my_mpi_rank in {0,1}:
-    tick = time()
+    # Process each query, one at a time.
 
-if my_mpi_rank == 0:
+    for inp_freq, inp_size, inp_desc in saftsparse.gen_dna_frequency(
+        args.input,
+        args.wordsize,
+        start=my_mpi_row,
+        step=mpi_nbr_rows,
+        getdesc=False):
 
-    # Initialize the vectors d2_vals_i for D2 values, and d2_pvals_i for p values.
+        # Calculate d2.
 
-    j_vals_i   = np.empty(dat_len, dtype=np.int64)
-    d2_vals_i  = np.empty(dat_len, dtype=np.double)
-    d2_pvals_i = np.empty(dat_len, dtype=np.double)
-else:
-    # Define the local to global mapping of column indices to use to send to the scribe process.
+        if args.timing and my_mpi_rank == 1:
+            tick = time()
 
-    local_to_global = lambda j: my_mpi_col + j * mpi_nbr_cols
+        d2_vals = np.asarray((inp_freq.T * dat_freq).todense())[0]
 
-# Print the results of each query, one at a time.
+        if args.timing and my_mpi_rank == 1:
+            d2_time += time() - tick
 
-for i in xrange(inp_len):
+        # Calculate theoretical means and vars.
 
-    if my_mpi_rank == 0:
-        print("Query:", inp_desc[i], "program: saftn word size:", args.wordsize)
+        if args.timing and my_mpi_rank == 1:
+            tick = time()
 
-    # Sort and cut off p values locally.
+        context = saftstats.stats_context(args.wordsize, alpha_freq)
 
-    if my_mpi_rank != 0:
+        d2_means = np.array([
+            saftstats.mean(context, inp_size + args.wordsize - 1, dat_size[j] + args.wordsize - 1)
+            for j in xrange(dat_len)])
+        d2_vars  = np.array([
+            saftstats.var(context, inp_size + args.wordsize - 1, dat_size[j] + args.wordsize - 1)
+            for j in xrange(dat_len)])
 
-        # Initialize the vectors d2_vals_i for D2 values, and d2_pvals_i for p values.
+        if args.timing and my_mpi_rank == 1:
+            mv_time += time() - tick
 
-        d2_vals_i  = d2_vals[i, :]
-        d2_pvals_i = d2_pvals[i, :]
+        # Calculate p values.
+
+        if args.timing and my_mpi_rank == 1:
+            tick = time()
+
+        d2_pvals = saftstats.pgamma_m_v_vector(d2_vals, d2_means, d2_vars)
+
+        if args.timing and my_mpi_rank == 1:
+            pv_time += time() - tick
+
+        if args.timing and my_mpi_rank == 1:
+            tick = time()
 
         # Sort by p value within this process.
 
-        jsorted = np.argsort(d2_pvals_i)
+        jsorted = np.argsort(d2_pvals)
 
         # Cut off by number of p values within this process.
 
-        j_vals_i = jsorted[ : nbr_pvals]
+        j_vals = jsorted[:nbr_pvals]
+
+        # Define the local to global mapping of column indices to use to send to the scribe process.
+
+        local_to_global = lambda j: my_mpi_col + j * mpi_nbr_cols
 
         # Store the global indices resulting from the sorting.
 
-        j_vals_i_global = np.array(map(local_to_global, j_vals_i), dtype=np.int64)
+        j_vals_global = np.array(map(local_to_global, j_vals), dtype=np.int64)
 
-    # Gather the global indices, D2 values and p values into the scribe process.
+        # Gather the global indices, D2 values and p values into the scribe process.
 
-    if my_mpi_rank == 0:
-        mpi_row_comm = row_comms[i % mpi_nbr_rows]
-        mpi_row_comm.Gatherv([None, MPI.LONG],   [j_vals_i,   (dat_len_vec, None), MPI.LONG])
-        mpi_row_comm.Gatherv([None, MPI.DOUBLE], [d2_vals_i,  (dat_len_vec, None), MPI.DOUBLE])
-        mpi_row_comm.Gatherv([None, MPI.DOUBLE], [d2_pvals_i, (dat_len_vec, None), MPI.DOUBLE])
-    else:
         mpi_row_comm = my_row_comm
-        mpi_row_comm.Gatherv([j_vals_i_global,      MPI.LONG],   [None, (dat_len_vec, None), MPI.LONG])
-        mpi_row_comm.Gatherv([d2_vals_i[j_vals_i],  MPI.DOUBLE], [None, (dat_len_vec, None), MPI.DOUBLE])
-        mpi_row_comm.Gatherv([d2_pvals_i[j_vals_i], MPI.DOUBLE], [None, (dat_len_vec, None), MPI.DOUBLE])
+        mpi_row_comm.Gatherv([j_vals_global,    MPI.LONG],     [None, (dat_len_vec, None), MPI.LONG])
+        mpi_row_comm.Gatherv([d2_vals[j_vals],  MPI.UNSIGNED], [None, (dat_len_vec, None), MPI.UNSIGNED])
+        mpi_row_comm.Gatherv([d2_pvals[j_vals], MPI.DOUBLE],   [None, (dat_len_vec, None), MPI.DOUBLE])
 
-    if my_mpi_rank == 0:
+        if args.timing and my_mpi_rank == 1:
+            ad_time += time() - tick
+
+    if args.timing and my_mpi_rank == 1:
+        print("Process", my_mpi_rank, ":", "Calculate d2   time ==", "{:f}".format( d2_time ))
+        print("Process", my_mpi_rank, ":", "Means and vars time ==", "{:f}".format( mv_time ))
+        print("Process", my_mpi_rank, ":", "Calc p-values  time ==", "{:f}".format( pv_time ))
+        print("Process", my_mpi_rank, ":", "Adj p-values   time ==", "{:f}".format( ad_time ))
+
+else:
+    # Print p values.
+
+    if args.timing:
+        tick = time()
+
+    # Initialize the vectors d2_vals for D2 values, and d2_pvals for p values.
+
+    j_vals   = np.empty(dat_len, dtype=np.int64)
+    d2_vals  = np.empty(dat_len, dtype=np.double)
+    d2_pvals = np.empty(dat_len, dtype=np.double)
+
+    # Print the results of each query, one at a time.
+
+    i = 0
+    for inp_desc in saftsparse.gen_dna_desc(args.input):
+
+        print("Query:", inp_desc, "program: saftn word size:", args.wordsize)
+
+        # Gather the global indices, D2 values and p values into the scribe process.
+
+        mpi_row_comm = row_comms[i % mpi_nbr_rows]
+        mpi_row_comm.Gatherv([None, MPI.LONG],     [j_vals,   (dat_len_vec, None), MPI.LONG])
+        mpi_row_comm.Gatherv([None, MPI.UNSIGNED], [d2_vals,  (dat_len_vec, None), MPI.UNSIGNED])
+        mpi_row_comm.Gatherv([None, MPI.DOUBLE],   [d2_pvals, (dat_len_vec, None), MPI.DOUBLE])
 
         # Sort, adjust, cutoff and print p values.
 
         nbr_pvals = np.sum(dat_len_vec[1 : mpi_nbr_cols + 1])
-        jsorted = np.argsort(d2_pvals_i[ : nbr_pvals])
-        d2_adj_pvals_i = saftstats.BH_array(d2_pvals_i[jsorted], dat_len)
+        jsorted = np.argsort(d2_pvals[:nbr_pvals])
+        d2_adj_pvals = saftstats.BH_array(d2_pvals[jsorted], dat_len)
         nbr_pvals = min(args.showmax, nbr_pvals)
-        jrange = [j for j in xrange(nbr_pvals) if d2_adj_pvals_i[j] < args.pmax]
+        jrange = [j for j in xrange(nbr_pvals) if d2_adj_pvals[j] < args.pmax]
         if len(jrange) > 0:
             for j in jrange:
                 js = jsorted[j]
-                jg = j_vals_i[js]
+                jg = j_vals[js]
                 print("  Hit:", dat_desc[jg],
-                      "D2:", "{:d}".format(long(d2_vals_i[js])),
-                      "adj.p.val:", "{:11.5e}".format(d2_adj_pvals_i[j]),
-                      "p.val:", "{:11.5e}".format(d2_pvals_i[js]))
+                      "D2:", "{:d}".format(long(d2_vals[js])),
+                      "adj.p.val:", "{:11.5e}".format(d2_adj_pvals[j]),
+                      "p.val:", "{:11.5e}".format(d2_pvals[js]))
         else:
             print("No hit found")
+        i += 1
 
-if args.timing and my_mpi_rank in {0,1}:
-    print("Process", my_mpi_rank, ":", "Print p-values time ==", "{:f}".format( time() - tick ))
+    if args.timing:
+        print("Process", my_mpi_rank, ":", "Print p-values time ==", "{:f}".format( time() - tick ))

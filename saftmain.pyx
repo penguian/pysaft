@@ -65,9 +65,7 @@ if args.timing:
     print "Database shape ==", dat_freq.shape
     print "Database nonzeros ==", dat_freq.nnz
     print "Database maximum ==", max(dat_freq.data)
-    print "Database indices ==", dat_freq.indices
     print "Database indices.shape ==", dat_freq.indices.shape
-    print "Database indptr ==", dat_freq.indptr
     print "Database indptr.shape ==", dat_freq.indptr.shape
     print "Database nonzeros per sequence ==", dat_freq.nnz / (dat_len * 1.0)
     print "Database total sequence length ==", sum(dat_size)
@@ -94,7 +92,7 @@ for inp_freq, inp_size, inp_desc in saftsparse.gen_dna_frequency(args.input, arg
     if args.timing:
         tick = time()
 
-    d2_vals = np.asarray((inp_freq.T * dat_freq).todense())
+    d2_vals = np.asarray((inp_freq.T * dat_freq).todense())[0]
 
     if args.timing:
         d2_time += time() - tick
@@ -109,9 +107,9 @@ for inp_freq, inp_size, inp_desc in saftsparse.gen_dna_frequency(args.input, arg
     context = saftstats.stats_context(args.wordsize, alpha_freq)
 
     d2_means = np.array([saftstats.mean(context, inp_size + args.wordsize - 1, dat_size[j] + args.wordsize - 1)
-                          for j in xrange(dat_len)], ndmin=2)
+                          for j in xrange(dat_len)])
     d2_vars  = np.array([saftstats.var( context, inp_size + args.wordsize - 1, dat_size[j] + args.wordsize - 1)
-                          for j in xrange(dat_len)], ndmin=2)
+                          for j in xrange(dat_len)])
 
     if args.timing:
         mv_time += time() - tick
@@ -121,7 +119,7 @@ for inp_freq, inp_size, inp_desc in saftsparse.gen_dna_frequency(args.input, arg
     if args.timing:
         tick = time()
 
-    d2_pvals = saftstats.pgamma_m_v(d2_vals, d2_means, d2_vars)[0]
+    d2_pvals = saftstats.pgamma_m_v_vector(d2_vals, d2_means, d2_vars)
 
     if args.timing:
         pv_time += time() - tick
@@ -140,7 +138,7 @@ for inp_freq, inp_size, inp_desc in saftsparse.gen_dna_frequency(args.input, arg
         for j in jrange:
             js = jsorted[j]
             print "  Hit:", dat_desc[js],
-            print "D2:", "{:d}".format(long(d2_vals[0, js])),
+            print "D2:", "{:d}".format(long(d2_vals[js])),
             print "adj.p.val:", "{:11.5e}".format(d2_adj_pvals[j]),
             print "p.val:", "{:11.5e}".format(d2_pvals[js])
     else:
