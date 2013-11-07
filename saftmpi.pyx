@@ -33,7 +33,7 @@ class Process:
             self.row = (self.rank - 1) // self.nbr_cols
             self.col = (self.rank - 1) %  self.nbr_cols
         """
-        # Create a communicator for each process row.
+        Create a communicator for each process row.
         """
         world_group = world_comm.Get_group()
         if self.rank == 0:
@@ -51,8 +51,8 @@ class Process:
                     self.row_comm  = row_comm
             else:
                 """
-                # Open MPI has a bug which produces a segfault if
-                # MPI.GROUP_EMPTY is used in the call to Incl().
+                Open MPI has a bug which produces a segfault if
+                MPI.GROUP_EMPTY is used in the call to Incl().
                 """
                 row_group = world_group.Incl([0]) #MPI.GROUP_EMPTY
                 row_comm = world_comm.Create(row_group)
