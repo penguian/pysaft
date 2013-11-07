@@ -18,9 +18,10 @@
 
 import argparse
 
-def parse_args(mpi_args=False):
-    parser = argparse.ArgumentParser(
-        description="Prototype SAFT using SciPy sparse matrix multiplication")
+def parse_args(
+        description="Prototype SAFT using SciPy sparse matrix multiplication",
+        mpi_args=False):
+    parser = argparse.ArgumentParser(description=description)
     parser.add_argument("--input",
                         action="store",
                         required=True,
