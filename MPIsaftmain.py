@@ -20,7 +20,7 @@ import numpy as np
 import saftargs
 import saftsparse
 import saftstats
-from mpi4py import MPI
+import saftmpi
 from time import time
 
 def print_mpi_rank(rank):
@@ -41,112 +41,74 @@ alphabet = saftsparse.dna_alphabet
 alpha = len(alphabet)
 alpha_freq = np.ones(alpha) / alpha
 
-# Establish which process MPI thinks this is.
+# Establish which process MPI thinks this is,
+# Create a communicator for each process row.
 
-comm = MPI.COMM_WORLD
+my_process = saftmpi.Process(args)
 
-mpi_nbr_rows = args.mpi_rows
-mpi_nbr_cols = (comm.size - 1) // mpi_nbr_rows
-my_mpi_rank = comm.rank
-if my_mpi_rank != 0:
-    my_mpi_row = (my_mpi_rank - 1) // mpi_nbr_cols
-    my_mpi_col = (my_mpi_rank - 1) %  mpi_nbr_cols
-    if my_mpi_rank > mpi_nbr_rows * mpi_nbr_cols:
-        print_mpi_rank(my_mpi_rank)
-        print "Warning: process is redundant:",
-        print "mpi_rows ==", mpi_nbr_rows,
-        print "comm.size ==", comm.size
+if my_process.rank > my_process.nbr_rows * my_process.nbr_cols:
+    print_mpi_rank(my_process.rank)
+    print "Warning: process is redundant:",
+    print "nbr_rows ==", my_process.nbr_rows,
+    print "comm_world.size ==", my_process.comm_world.size
 
-if args.timing and my_mpi_rank in {0,1}:
-    print_mpi_rank(my_mpi_rank)
-    print_elapsed_time("Argument parse time", time() - tick)
+if args.timing and my_process.rank in {0,1}:
+    print_mpi_rank(my_process.rank)
+    print_elapsed_time("Communicator   time", time() - tick)
 
-# Parse database sequences and build frequency matrix.
+# Parse database sequences and build database frequency matrix.
 
-if args.timing and my_mpi_rank in {0,1}:
+if args.timing and my_process.rank in {0,1}:
     tick = time()
 
-if my_mpi_rank == 0:
+if my_process.rank == 0:
     dat_desc = saftsparse.build_dna_desc_list(args.database)
     dat_len = len(dat_desc)
 else:
     dat_freq, dat_size, dat_desc = saftsparse.build_dna_sparse_frequency_matrix(
         args.database,
         args.wordsize,
-        my_mpi_col,
-        mpi_nbr_cols,
+        my_process.col,
+        my_process.nbr_cols,
         getdesc=False)
     dat_len = dat_freq.shape[1]
 
-if args.timing and my_mpi_rank in {0,1}:
-    print_mpi_rank(my_mpi_rank)
+if args.timing and my_process.rank in {0,1}:
+    print_mpi_rank(my_process.rank)
     print_elapsed_time("Database parse time", time() - tick)
-
-# Create a communicator for each process row.
-
-if args.timing and my_mpi_rank in {0,1}:
-    tick = time()
-
-world_group = comm.Get_group()
-if my_mpi_rank == 0:
-    row_comms = []
-for mpi_row in xrange(mpi_nbr_rows):
-    if my_mpi_rank == 0 or mpi_row == my_mpi_row:
-        ranks = [0] + range(mpi_nbr_cols * mpi_row + 1,
-                            mpi_nbr_cols * (mpi_row + 1)  + 1)
-        mpi_row_group = world_group.Incl(ranks)
-        mpi_row_comm = comm.Create(mpi_row_group)
-        if my_mpi_rank == 0:
-            row_comms.append(mpi_row_comm)
-        else:
-            my_row_comm  = mpi_row_comm
-    else:
-        # Open MPI has a bug which produces a segfault if
-        # MPI.GROUP_EMPTY is used in the call to Incl().
-
-        mpi_row_group = world_group.Incl([0]) #MPI.GROUP_EMPTY
-        mpi_row_comm = comm.Create(mpi_row_group)
-
-if args.timing and my_mpi_rank in {0,1}:
-    print_mpi_rank(my_mpi_rank)
-    print_elapsed_time("Communicator   time", time() - tick)
 
 # Get the number of database sequences from each worker process
 # in process row 0. This number should be the same for all process rows.
 
-if args.timing and my_mpi_rank in {0,1}:
+if args.timing and my_process.rank in {0,1}:
     tick = time()
 
-dat_len_vec = np.zeros(mpi_nbr_cols + 1, dtype=np.int64)
+dat_len_vec = np.zeros(my_process.nbr_cols + 1, dtype=np.int64)
 
-if my_mpi_rank != 0:
+if my_process.rank != 0:
 
     # Determine the number of p values within this process
     # to send back to the scribe process.
 
     nbr_pvals = min(args.showmax, dat_len)
 
-if my_mpi_rank == 0:
+if my_process.rank == 0:
     dat_len_val = np.array(0, dtype=np.int64)
-    mpi_row_comm = row_comms[0]
-    mpi_row_comm.Gather([dat_len_val, MPI.LONG],
-                        [dat_len_vec, MPI.LONG])
+    my_process.gather_recv_size(dat_len_vec)
 
     # Zero out entry zero: we don't want to send ourselves unnecessary data.
 
     dat_len_vec[0] = 0
-elif my_mpi_row == 0:
+elif my_process.row == 0:
     dat_len_val = np.array(nbr_pvals, dtype=np.int64)
-    mpi_row_comm = my_row_comm
-    mpi_row_comm.Gather([dat_len_val, MPI.LONG],
-                        [dat_len_vec, MPI.LONG])
+    my_process.gather_send_size(dat_len_vec, dat_len_val)
 
-if args.timing and my_mpi_rank in {0,1}:
-    print_mpi_rank(my_mpi_rank)
+if args.timing and my_process.rank in {0,1}:
+    print_mpi_rank(my_process.rank)
     print_elapsed_time("Get nbr p-vals time", time() - tick)
 
-if my_mpi_rank != 0:
-    if args.timing and my_mpi_rank == 1:
+if my_process.rank != 0:
+    if args.timing and my_process.rank == 1:
         d2_time = 0
         mv_time = 0
         pv_time = 0
@@ -157,23 +119,23 @@ if my_mpi_rank != 0:
     for inp_freq, inp_size, inp_desc in saftsparse.gen_dna_frequency(
         args.input,
         args.wordsize,
-        start=my_mpi_row,
-        step=mpi_nbr_rows,
+        start=my_process.row,
+        step=my_process.nbr_rows,
         getdesc=False):
 
         # Calculate d2.
 
-        if args.timing and my_mpi_rank == 1:
+        if args.timing and my_process.rank == 1:
             tick = time()
 
         d2_vals = np.asarray((inp_freq.T * dat_freq).todense())[0]
 
-        if args.timing and my_mpi_rank == 1:
+        if args.timing and my_process.rank == 1:
             d2_time += time() - tick
 
         # Calculate theoretical means and vars.
 
-        if args.timing and my_mpi_rank == 1:
+        if args.timing and my_process.rank == 1:
             tick = time()
 
         context = saftstats.stats_context(args.wordsize, alpha_freq)
@@ -189,22 +151,22 @@ if my_mpi_rank != 0:
                           dat_size[j] + args.wordsize - 1)
             for j in xrange(dat_len)])
 
-        if args.timing and my_mpi_rank == 1:
+        if args.timing and my_process.rank == 1:
             mv_time += time() - tick
 
         # Calculate p values.
 
-        if args.timing and my_mpi_rank == 1:
+        if args.timing and my_process.rank == 1:
             tick = time()
 
         d2_pvals = saftstats.pgamma_m_v_vector(d2_vals, d2_means, d2_vars)
 
-        if args.timing and my_mpi_rank == 1:
+        if args.timing and my_process.rank == 1:
             pv_time += time() - tick
 
         # Sort by p value within this process.
 
-        if args.timing and my_mpi_rank == 1:
+        if args.timing and my_process.rank == 1:
             tick = time()
 
         jsorted = np.argsort(d2_pvals)
@@ -216,7 +178,7 @@ if my_mpi_rank != 0:
         # Define the local to global mapping of column indices to use
         # to send to the scribe process.
 
-        local_to_global = lambda j: my_mpi_col + j * mpi_nbr_cols
+        local_to_global = lambda j: my_process.col + j * my_process.nbr_cols
 
         # Store the global indices resulting from the sorting.
 
@@ -226,25 +188,21 @@ if my_mpi_rank != 0:
         # Gather the global indices, D2 values and p values into
         # the scribe process.
 
-        mpi_row_comm = my_row_comm
-        mpi_row_comm.Gatherv([j_vals_global,    MPI.LONG],
-                             [None, (dat_len_vec, None), MPI.LONG])
-        mpi_row_comm.Gatherv([d2_vals[j_vals],  MPI.UNSIGNED],
-                             [None, (dat_len_vec, None), MPI.UNSIGNED])
-        mpi_row_comm.Gatherv([d2_pvals[j_vals], MPI.DOUBLE],
-                             [None, (dat_len_vec, None), MPI.DOUBLE])
+        my_process.gatherv_send(dat_len_vec, j_vals_global)
+        my_process.gatherv_send(dat_len_vec, d2_vals[j_vals])
+        my_process.gatherv_send(dat_len_vec, d2_pvals[j_vals])
 
-        if args.timing and my_mpi_rank == 1:
+        if args.timing and my_process.rank == 1:
             ad_time += time() - tick
 
-    if args.timing and my_mpi_rank == 1:
-        print_mpi_rank(my_mpi_rank)
+    if args.timing and my_process.rank == 1:
+        print_mpi_rank(my_process.rank)
         print_elapsed_time("Calculate d2   time", d2_time)
-        print_mpi_rank(my_mpi_rank)
+        print_mpi_rank(my_process.rank)
         print_elapsed_time("Means and vars time", mv_time)
-        print_mpi_rank(my_mpi_rank)
+        print_mpi_rank(my_process.rank)
         print_elapsed_time("Calc p-values  time", pv_time)
-        print_mpi_rank(my_mpi_rank)
+        print_mpi_rank(my_process.rank)
         print_elapsed_time("Adj p-values   time", ad_time)
 
 else:
@@ -262,23 +220,20 @@ else:
     i = 0
     for inp_desc in saftsparse.gen_dna_desc(args.input):
 
-        print "Query:", inp_desc,
-        print "program: saftn word size:", args.wordsize
-
         # Gather the global indices, D2 values and p values into
         # the scribe process.
 
-        mpi_row_comm = row_comms[i % mpi_nbr_rows]
-        mpi_row_comm.Gatherv([None, MPI.LONG],
-                             [j_vals,   (dat_len_vec, None), MPI.LONG])
-        mpi_row_comm.Gatherv([None, MPI.UNSIGNED],
-                             [d2_vals,  (dat_len_vec, None), MPI.UNSIGNED])
-        mpi_row_comm.Gatherv([None, MPI.DOUBLE],
-                             [d2_pvals, (dat_len_vec, None), MPI.DOUBLE])
+        process_row = i % my_process.nbr_rows
+        my_process.gatherv_recv(dat_len_vec, j_vals,  process_row)
+        my_process.gatherv_recv(dat_len_vec, d2_vals, process_row)
+        my_process.gatherv_recv(dat_len_vec, d2_pvals,process_row)
+
+        print "Query:", inp_desc,
+        print "program: saftn word size:", args.wordsize
 
         # Sort, adjust, cutoff and print p values.
 
-        nbr_pvals = np.sum(dat_len_vec[1 : mpi_nbr_cols + 1])
+        nbr_pvals = np.sum(dat_len_vec[1 : my_process.nbr_cols + 1])
         jsorted = np.argsort(d2_pvals[:nbr_pvals])
         d2_adj_pvals = saftstats.BH_array(d2_pvals[jsorted], dat_len)
         nbr_pvals = min(args.showmax, nbr_pvals)
@@ -297,5 +252,5 @@ else:
         i += 1
 
     if args.timing:
-        print_mpi_rank(my_mpi_rank)
+        print_mpi_rank(my_process.rank)
         print_elapsed_time("Print p-values time", time() - tick)

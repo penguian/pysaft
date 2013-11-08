@@ -1,13 +1,12 @@
-CFLAGS="-g -O3" 
+CFLAGS="-g -O3"
 
-all: saftmain.so saftsparse.so saftstats.so
+so_files=saftmain.so saftmpi.so saftsparse.so saftstats.so
+all: $(so_files)
 
-saftmain.so: saftmain.pyx
-	CFLAGS=$(CFLAGS) python setup_saftmain.py build_ext --inplace
-saftsparse.so: saftsparse.pyx
-	CFLAGS=$(CFLAGS) python setup_saftsparse.py build_ext --inplace
+%.so: %.pyx
+	CFLAGS=$(CFLAGS) ext_name=$* source_pyx=$*.pyx python setup.py build_ext --inplace
 saftstats.so: saftstats.pyx
 	CFLAGS=$(CFLAGS) python setup_saftstats.py build_ext --inplace
 
 clean:
-	rm saftmain.c saftsparse.c saftstats.c saftmain.so saftsparse.so saftstats.so; rm -rf build
+	rm -f $(so_files:.so=.c) $(so_files); rm -rf build
