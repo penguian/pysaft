@@ -19,9 +19,17 @@
 import numpy as np
 import scipy.sparse as ss
 from Bio import SeqIO
-from time import time
+
+def build_alpha_dict(char* alphabet):
+    cdef unsigned int alpha = len(alphabet)
+    cdef unsigned int k
+    alpha_dict = {}
+    for k in xrange(alpha):
+        alpha_dict[<char>(alphabet[k])] = k
+    return alpha_dict
 
 dna_alphabet = "ACGT"
+dna_alpha_dict = build_alpha_dict(dna_alphabet)
 
 cdef int restart_pos(alpha_dict, char* seq, unsigned int word_len, unsigned int start_pos):
     cdef unsigned int seq_len = len(seq)
@@ -88,15 +96,11 @@ def build_dna_desc_list(file_name):
 
 def gen_dna_frequency(file_name,
                       unsigned int word_len,
-                      start=0,
-                      step=1,
+                      unsigned int start=0,
+                      unsigned int step=1,
                       getdesc=True,
                       masked=True):
-    cdef char* alphabet = dna_alphabet
-    cdef unsigned int alpha = len(alphabet)
-    alpha_dict = {}
-    for k in xrange(alpha):
-        alpha_dict[<char>(alphabet[k])] = k
+    alpha_dict = dna_alpha_dict
     cdef char* seq
     cdef unsigned int recnbr = 0
     with open(file_name) as file_handle:
@@ -110,19 +114,20 @@ def gen_dna_frequency(file_name,
             recnbr += 1
 
 def build_dna_sparse_frequency_matrix(file_name,
-                                      word_len,
-                                      start=0,
-                                      step=1,
+                                      unsigned int word_len,
+                                      unsigned int start=0,
+                                      unsigned int step=1,
                                       getdesc=True,
                                       masked=True):
     size_list = []
     desc_list = []
-    array_len = 2
+    cdef unsigned long array_len = 2
     rows = np.empty((array_len), dtype=np.intc)
     cols = np.empty((array_len), dtype=np.intc)
     data = np.empty((array_len), dtype=np.uint32)
-    nnz = 0
-    nbr_cols = 0
+    cdef unsigned long nnz = 0
+    cdef unsigned long next_nnz
+    cdef int nbr_cols = 0
     for frequency, nbr_words, description in gen_dna_frequency(
             file_name,
             word_len,
@@ -146,4 +151,4 @@ def build_dna_sparse_frequency_matrix(file_name,
         nbr_cols += 1
     shape = (frequency.shape[0], nbr_cols)
     return ss.csr_matrix((data,(rows, cols)), shape=shape), size_list, desc_list
-    
+
