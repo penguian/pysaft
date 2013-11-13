@@ -26,7 +26,8 @@ from time import time
 def print_mpi_rank(rank):
     print "Process", rank, ":",
 
-def print_elapsed_time(message, elapsed_time):
+def print_elapsed_time(rank, message, elapsed_time):
+    print_mpi_rank(rank)
     print message, "==", "{:f}".format(elapsed_time)
 
 # Parse arguments.
@@ -45,23 +46,23 @@ alpha_freq = np.ones(alpha) / alpha
 # Create a communicator for each process row.
 
 my_process = saftmpi.Process(args)
+my_rank = my_process.rank
 
-if my_process.rank > my_process.nbr_rows * my_process.nbr_cols:
-    print_mpi_rank(my_process.rank)
+if my_rank > my_process.nbr_rows * my_process.nbr_cols:
+    print_mpi_rank(my_rank)
     print "Warning: process is redundant:",
     print "nbr_rows ==", my_process.nbr_rows,
     print "comm_world.size ==", my_process.comm_world.size
 
-if args.timing and my_process.rank in {0,1}:
-    print_mpi_rank(my_process.rank)
-    print_elapsed_time("Communicator   time", time() - tick)
+if args.timing and my_rank in {0,1}:
+    print_elapsed_time(my_rank, "Communicator   time", time() - tick)
 
 # Parse database sequences and build database frequency matrix.
 
-if args.timing and my_process.rank in {0,1}:
+if args.timing and my_rank in {0,1}:
     tick = time()
 
-if my_process.rank == 0:
+if my_rank == 0:
     dat_desc = saftsparse.build_dna_desc_list(args.database)
     dat_len = len(dat_desc)
 else:
@@ -73,26 +74,25 @@ else:
         getdesc=False)
     dat_len = dat_freq.shape[1]
 
-if args.timing and my_process.rank in {0,1}:
-    print_mpi_rank(my_process.rank)
-    print_elapsed_time("Database parse time", time() - tick)
+if args.timing and my_rank in {0,1}:
+    print_elapsed_time(my_rank, "Database parse time", time() - tick)
 
 # Get the number of database sequences from each worker process
 # in process row 0. This number should be the same for all process rows.
 
-if args.timing and my_process.rank in {0,1}:
+if args.timing and my_rank in {0,1}:
     tick = time()
 
 dat_len_vec = np.zeros(my_process.nbr_cols + 1, dtype=np.int64)
 
-if my_process.rank != 0:
+if my_rank != 0:
 
     # Determine the number of p values within this process
     # to send back to the scribe process.
 
     nbr_pvals = min(args.showmax, dat_len)
 
-if my_process.rank == 0:
+if my_rank == 0:
     dat_len_val = np.array(0, dtype=np.int64)
     my_process.gather_recv_size(dat_len_vec)
 
@@ -103,12 +103,11 @@ elif my_process.row == 0:
     dat_len_val = np.array(nbr_pvals, dtype=np.int64)
     my_process.gather_send_size(dat_len_vec, dat_len_val)
 
-if args.timing and my_process.rank in {0,1}:
-    print_mpi_rank(my_process.rank)
-    print_elapsed_time("Get nbr p-vals time", time() - tick)
+if args.timing and my_rank in {0,1}:
+    print_elapsed_time(my_rank, "Get nbr p-vals time", time() - tick)
 
-if my_process.rank != 0:
-    if args.timing and my_process.rank == 1:
+if my_rank != 0:
+    if args.timing and my_rank == 1:
         d2_time = 0
         mv_time = 0
         pv_time = 0
@@ -125,17 +124,17 @@ if my_process.rank != 0:
 
         # Calculate d2.
 
-        if args.timing and my_process.rank == 1:
+        if args.timing and my_rank == 1:
             tick = time()
 
         d2_vals = np.asarray((inp_freq.T * dat_freq).todense())[0]
 
-        if args.timing and my_process.rank == 1:
+        if args.timing and my_rank == 1:
             d2_time += time() - tick
 
         # Calculate theoretical means and vars.
 
-        if args.timing and my_process.rank == 1:
+        if args.timing and my_rank == 1:
             tick = time()
 
         context = saftstats.stats_context(args.wordsize, alpha_freq)
@@ -151,22 +150,22 @@ if my_process.rank != 0:
                           dat_size[j] + args.wordsize - 1)
             for j in xrange(dat_len)])
 
-        if args.timing and my_process.rank == 1:
+        if args.timing and my_rank == 1:
             mv_time += time() - tick
 
         # Calculate p values.
 
-        if args.timing and my_process.rank == 1:
+        if args.timing and my_rank == 1:
             tick = time()
 
         d2_pvals = saftstats.pgamma_m_v_vector(d2_vals, d2_means, d2_vars)
 
-        if args.timing and my_process.rank == 1:
+        if args.timing and my_rank == 1:
             pv_time += time() - tick
 
         # Sort by p value within this process.
 
-        if args.timing and my_process.rank == 1:
+        if args.timing and my_rank == 1:
             tick = time()
 
         jsorted = np.argsort(d2_pvals)
@@ -192,18 +191,14 @@ if my_process.rank != 0:
         my_process.gatherv_send(dat_len_vec, d2_vals[j_vals])
         my_process.gatherv_send(dat_len_vec, d2_pvals[j_vals])
 
-        if args.timing and my_process.rank == 1:
+        if args.timing and my_rank == 1:
             ad_time += time() - tick
 
-    if args.timing and my_process.rank == 1:
-        print_mpi_rank(my_process.rank)
-        print_elapsed_time("Calculate d2   time", d2_time)
-        print_mpi_rank(my_process.rank)
-        print_elapsed_time("Means and vars time", mv_time)
-        print_mpi_rank(my_process.rank)
-        print_elapsed_time("Calc p-values  time", pv_time)
-        print_mpi_rank(my_process.rank)
-        print_elapsed_time("Adj p-values   time", ad_time)
+    if args.timing and my_rank == 1:
+        print_elapsed_time(my_rank, "Calculate d2   time", d2_time)
+        print_elapsed_time(my_rank, "Means and vars time", mv_time)
+        print_elapsed_time(my_rank, "Calc p-values  time", pv_time)
+        print_elapsed_time(my_rank, "Adj p-values   time", ad_time)
 
 else:
     if args.timing:
@@ -252,5 +247,4 @@ else:
         i += 1
 
     if args.timing:
-        print_mpi_rank(my_process.rank)
-        print_elapsed_time("Print p-values time", time() - tick)
+        print_elapsed_time(my_rank, "Print p-values time", time() - tick)
