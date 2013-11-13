@@ -110,7 +110,7 @@ for inp_freq, inp_size, inp_desc in saftsparse.gen_dna_frequency(
     if args.timing:
         tick = time()
 
-    d2_pvals = saftstats.pgamma_m_v_vector(d2_vals, d2_means, d2_vars)
+    d2_pvals = saftstats.pgamma_m_v(d2_vals, d2_means, d2_vars)
 
     if args.timing:
         pv_time += time() - tick
