@@ -1,6 +1,6 @@
 CFLAGS="-g -O3"
 
-so_files=saftmain.so saftmpi.so saftsparse.so saftstats.so
+so_files=MPIsaftmain.so saftmain.so saftmpi.so saftsparse.so saftstats.so
 all: $(so_files)
 
 %.so: %.pyx
