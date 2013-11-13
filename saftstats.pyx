@@ -23,9 +23,9 @@ import numpy as np
 import scipy.stats
 from cython_gsl cimport gsl_cdf_gamma_Q
 
-cdef double sum_freq_pow (object frequencies,
-                          unsigned int freq_pow,
-                          unsigned int sum_pow):
+cdef double sum_freq_pow(object frequencies,
+                         unsigned int freq_pow,
+                         unsigned int sum_pow):
     cdef double res = 0
     cdef unsigned int length = len(frequencies)
     cdef unsigned int i
@@ -33,11 +33,6 @@ cdef double sum_freq_pow (object frequencies,
         res += frequencies[i] ** freq_pow
     res = res ** sum_pow
     return res
-
-"""
- * FIXME There's quite a bit of optimisation and checking for numeric stability
- * that could be done here
-"""
 
 cdef class stats_context:
     cdef double p_2_k
@@ -50,9 +45,12 @@ cdef class stats_context:
     cdef unsigned int unif
 
     def __cinit__(self, word_size, letters_frequencies):
-
-        cdef int          n_letters = len(letters_frequencies)
-        cdef int          k = word_size
+        """
+        * FIXME There's quite a bit of optimisation and
+        * checking for numeric stability that could be done here
+        """
+        cdef int n_letters = len(letters_frequencies)
+        cdef int k = word_size
         cdef unsigned int i
         cdef unsigned int j
 
@@ -72,7 +70,7 @@ cdef class stats_context:
                 self.unif = False
                 break
 
-        self.sum_var_Yu = p (2, k) - p (2, 2 * k)
+        self.sum_var_Yu = p(2, k) - p(2, 2 * k)
 
         if not self.unif:
             self.cov_crab = (p(3, k) +
@@ -125,9 +123,9 @@ cdef class stats_context:
         self.cov_ac2 -= (k - 1) * (k - 1) * p(2, 2 * k)
         self.cov_ac2 *= 2
 
-cpdef double mean (stats_context context,
-                   unsigned int  query_size,
-                   unsigned int  subject_size):
+cpdef double mean(stats_context context,
+                  unsigned int  query_size,
+                  unsigned int  subject_size):
 
     cdef double m = query_size
     cdef double n = subject_size
@@ -150,23 +148,22 @@ cpdef double var (stats_context context,
 
     return mn * (context.sum_var_Yu + cov_crab + context.cov_diag + context.cov_ac1 + context.cov_ac2)
 
-def pgamma_m_v (d2, mean, var):
+def pgamma_m_v(stat, mean, var):
     scale = var / mean
     shape = mean / scale
 
-    cdef unsigned int nbr_pvals = d2.shape[0]
-
-    result = np.empty(d2.shape)
+    result = np.empty(stat.shape)
+    cdef unsigned int n_p_values = stat.shape[0]
     cdef unsigned int i
-    for i in xrange(nbr_pvals):
-        result[i] = gsl_cdf_gamma_Q (d2[i], shape[i], scale[i])
+    for i in xrange(n_p_values):
+        result[i] = gsl_cdf_gamma_Q (stat[i], shape[i], scale[i])
     return result
 
-"""
- * Benjamini and Hochberg method
- * p_values are expected to be already sorted in increasing order
-"""
-def BH_array (p_values, tot_n_p_values=0):
+def BH_array(p_values, tot_n_p_values=0):
+    """
+    Benjamini and Hochberg method.
+    p_values are expected to be already sorted in increasing order.
+    """
     cdef int i
 
     result = np.empty(p_values.shape)
@@ -177,5 +174,5 @@ def BH_array (p_values, tot_n_p_values=0):
         result[i] = (p_values[i] * tot_n_p_values) / (i + 1)
         if i < n_p_values - 1:
             if  result[i] > result[i + 1]:
-                result[i] = result[i + 1];
+                result[i] = result[i + 1]
     return result
