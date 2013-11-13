@@ -20,6 +20,7 @@ import argparse
 import numpy as np
 import saftargs
 import saftsparse
+import saftstage
 import saftstats
 from time import time
 
@@ -37,9 +38,7 @@ if args.timing:
 
 # Determine alphabet size and letter frequency.
 
-alphabet = saftsparse.dna_alphabet
-alpha = len(alphabet)
-alpha_freq = np.ones(alpha) / alpha
+alphabet, alpha, alpha_freq = saftstage.setup_dna_alphabet()
 
 # Parse database sequences and build database frequency matrix.
 
@@ -77,7 +76,7 @@ for inp_freq, inp_size, inp_desc in saftsparse.gen_dna_frequency(
     if args.timing:
         tick = time()
 
-    d2_vals = np.asarray((inp_freq.T * dat_freq).todense())[0]
+    d2_vals = saftstage.calculate_d2_statistic(inp_freq, dat_freq)
 
     if args.timing:
         d2_time += time() - tick
@@ -90,17 +89,13 @@ for inp_freq, inp_size, inp_desc in saftsparse.gen_dna_frequency(
     inp_len = inp_freq.shape[1]
 
     context = saftstats.stats_context(args.wordsize, alpha_freq)
-
-    d2_means = np.array([
-        saftstats.mean(context,
-                       inp_size + args.wordsize - 1,
-                       dat_size[j] + args.wordsize - 1)
-        for j in xrange(dat_len)])
-    d2_vars  = np.array([
-        saftstats.var(context,
-                      inp_size + args.wordsize - 1,
-                      dat_size[j] + args.wordsize - 1)
-        for j in xrange(dat_len)])
+    d2_means, d2_vars = saftstage.calculate_means_vars(
+        args,
+        context,
+        inp_freq,
+        inp_size,
+        dat_freq,
+        dat_size)
 
     if args.timing:
         mv_time += time() - tick
@@ -120,21 +115,14 @@ for inp_freq, inp_size, inp_desc in saftsparse.gen_dna_frequency(
     if args.timing:
         tick = time()
 
-    print "Query:", inp_desc, "program: saftn word size:", args.wordsize
-    jsorted = np.argsort(d2_pvals)
-    d2_adj_pvals = saftstats.BH_array(d2_pvals[jsorted])
-    nbr_pvals = min(args.showmax, d2_adj_pvals.shape[0])
-    jrange = [j for j in xrange(nbr_pvals)
-              if d2_adj_pvals[j] < args.pmax]
-    if len(jrange) > 0:
-        for j in jrange:
-            js = jsorted[j]
-            print "  Hit:", dat_desc[js],
-            print "D2:", "{:d}".format(long(d2_vals[js])),
-            print "adj.p.val:", "{:11.5e}".format(d2_adj_pvals[j]),
-            print "p.val:", "{:11.5e}".format(d2_pvals[js])
-    else:
-        print "No hit found"
+    saftstage.print_query_results_d2(
+        args,
+        inp_desc,
+        dat_desc,
+        d2_vals,
+        d2_pvals,
+        dat_len,
+        dat_len),
 
     if args.timing:
         pp_time += time() - tick

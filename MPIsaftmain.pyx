@@ -19,6 +19,7 @@
 import numpy as np
 import saftargs
 import saftsparse
+import saftstage
 import saftstats
 import saftmpi
 from time import time
@@ -40,9 +41,7 @@ args = saftargs.parse_args(mpi_args=True)
 
 # Determine alphabet size and letter frequency.
 
-alphabet = saftsparse.dna_alphabet
-alpha = len(alphabet)
-alpha_freq = np.ones(alpha) / alpha
+alphabet, alpha, alpha_freq = saftstage.setup_dna_alphabet()
 
 # Establish which process MPI thinks this is,
 # Create a communicator for each process row.
@@ -142,7 +141,7 @@ if my_rank != 0:
         if args.timing and my_rank == 1:
             tick = time()
 
-        d2_vals = np.asarray((inp_freq.T * dat_freq).todense())[0]
+        d2_vals = saftstage.calculate_d2_statistic(inp_freq, dat_freq)
 
         if args.timing and my_rank == 1:
             d2_time += time() - tick
@@ -153,19 +152,13 @@ if my_rank != 0:
             tick = time()
 
         context = saftstats.stats_context(args.wordsize, alpha_freq)
-
-        nbr_inp_words = inp_size + args.wordsize - 1
-
-        d2_means = np.array([
-            saftstats.mean(context,
-                           nbr_inp_words,
-                           dat_size[j] + args.wordsize - 1)
-            for j in xrange(dat_len)])
-        d2_vars  = np.array([
-            saftstats.var( context,
-                           nbr_inp_words,
-                           dat_size[j] + args.wordsize - 1)
-            for j in xrange(dat_len)])
+        d2_means, d2_vars = saftstage.calculate_means_vars(
+            args,
+            context,
+            inp_freq,
+            inp_size,
+            dat_freq,
+            dat_size)
 
         if args.timing and my_rank == 1:
             mv_time += time() - tick
@@ -240,27 +233,20 @@ else:
         my_process.gatherv_recv(dat_len_vec, d2_vals, process_row)
         my_process.gatherv_recv(dat_len_vec, d2_pvals,process_row)
 
-        print "Query:", inp_desc,
-        print "program: saftn word size:", args.wordsize
-
         # Sort, adjust, cutoff and print p values.
 
         nbr_pvals = np.sum(dat_len_vec[1 : my_process.nbr_cols + 1])
-        jsorted = np.argsort(d2_pvals[:nbr_pvals])
-        d2_adj_pvals = saftstats.BH_array(d2_pvals[jsorted], dat_len)
-        nbr_pvals = min(args.showmax, nbr_pvals)
-        jrange = [j for j in xrange(nbr_pvals)
-                  if d2_adj_pvals[j] < args.pmax]
-        if len(jrange) > 0:
-            for j in jrange:
-                js = jsorted[j]
-                jg = j_vals[js]
-                print "  Hit:", dat_desc[jg],
-                print "D2:", "{:d}".format(long(d2_vals[js])),
-                print "adj.p.val:", "{:11.5e}".format(d2_adj_pvals[j]),
-                print "p.val:", "{:11.5e}".format(d2_pvals[js])
-        else:
-            print "No hit found"
+        dat_desc_index = lambda j: j_vals[j]
+
+        saftstage.print_query_results_d2(
+            args,
+            inp_desc,
+            dat_desc,
+            d2_vals,
+            d2_pvals,
+            dat_len,
+            nbr_pvals,
+            dat_desc_index=dat_desc_index)
         i += 1
 
     if args.timing:
