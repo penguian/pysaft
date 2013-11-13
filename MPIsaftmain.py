@@ -158,7 +158,7 @@ if my_rank != 0:
         if args.timing and my_rank == 1:
             tick = time()
 
-        d2_pvals = saftstats.pgamma_m_v_vector(d2_vals, d2_means, d2_vars)
+        d2_pvals = saftstats.pgamma_m_v(d2_vals, d2_means, d2_vars)
 
         if args.timing and my_rank == 1:
             pv_time += time() - tick

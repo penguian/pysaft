@@ -150,22 +150,7 @@ cpdef double var (stats_context context,
 
     return mn * (context.sum_var_Yu + cov_crab + context.cov_diag + context.cov_ac1 + context.cov_ac2)
 
-def pgamma_m_v_matrix (d2, mean, var):
-    scale = var / mean
-    shape = mean / scale
-
-    cdef unsigned int rows = d2.shape[0]
-    cdef unsigned int cols = d2.shape[1]
-
-    result = np.empty(d2.shape)
-    cdef unsigned int i
-    cdef unsigned int j
-    for i in xrange(rows):
-        for j in xrange(cols):
-            result[i, j] = gsl_cdf_gamma_Q (d2[i, j], shape[i, j], scale[i, j])
-    return result
-
-def pgamma_m_v_vector (d2, mean, var):
+def pgamma_m_v (d2, mean, var):
     scale = var / mean
     shape = mean / scale
 
@@ -176,17 +161,6 @@ def pgamma_m_v_vector (d2, mean, var):
     for i in xrange(nbr_pvals):
         result[i] = gsl_cdf_gamma_Q (d2[i], shape[i], scale[i])
     return result
-
-def pgamma_m_v (d2, mean, var):
-    scale = var / mean
-    shape = mean / scale
-
-    it = np.nditer(
-        [d2, shape, scale, None],
-        op_flags=[['readonly'],['readonly'],['readonly'],['writeonly', 'allocate']])
-    for this_d2, this_shape, this_scale, this_result in it:
-        this_result[...] = gsl_cdf_gamma_Q (this_d2, this_shape, this_scale)
-    return it.operands[3]
 
 """
  * Benjamini and Hochberg method
