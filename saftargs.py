@@ -22,24 +22,29 @@ def parse_args(
         description="Prototype SAFT using SciPy sparse matrix multiplication",
         mpi_args=False):
     parser = argparse.ArgumentParser(description=description)
-    parser.add_argument("--input",
+    parser.add_argument("-i",
+                        "--input",
                         action="store",
                         required=True,
                         help="Path to the input file")
-    parser.add_argument("--database",
+    parser.add_argument("-d",
+                        "--database",
                         action="store",
                         required=True,
                         help="Path to the output file")
-    parser.add_argument("--wordsize",
+    parser.add_argument("-w",
+                        "--wordsize",
                         action="store",
                         type=int,   default=7,
                         help="Word size (7)")
-    parser.add_argument("--showmax",
+    parser.add_argument("-b",
+                        "--showmax",
                         action="store",
                         type=int,
                         default=50,
                         help="Maximum number of results to show (50)")
-    parser.add_argument("--pmax",
+    parser.add_argument("-e",
+                        "--pmax",
                         action="store",
                         type=float,
                         default=0.05,
@@ -48,6 +53,10 @@ def parse_args(
                         action="store_true",
                         default=False,
                         help="Time key processing steps (False)")
+    parser.add_argument("--memmap",
+                        action="store_true",
+                        default=False,
+                        help="Use Numpy memmap to store the database (False)")
     if mpi_args:
         parser.add_argument("--mpi_rows",
                             action="store",
