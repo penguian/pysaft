@@ -18,7 +18,9 @@
 
 import numpy as np
 import scipy.sparse as ss
+import os
 from Bio import SeqIO
+from tempfile import mkdtemp
 
 def build_alpha_dict(char* alphabet):
     cdef unsigned int alpha = len(alphabet)
@@ -152,3 +154,128 @@ def build_dna_sparse_frequency_matrix(file_name,
     shape = (frequency.shape[0], nbr_cols)
     return ss.csr_matrix((data,(rows, cols)), shape=shape), size_list, desc_list
 
+class slice_end:
+    def __init__(self, nnz, nbr_cols):
+        self.nnz = nnz
+        self.nbr_cols = nbr_cols
+
+class sparse_matrix_memmap:
+    def __init__(self, data, rows, cols, shape, ends_list):
+        self.data = data
+        self.rows = rows
+        self.cols = cols
+        self.shape = shape
+        self.ends_list = ends_list
+    def __del__(self):
+        try:
+            os.unlink(self.data.filename)
+            os.unlink(self.rows.filename)
+            os.unlink(self.cols.filename)
+            os.rmdir(os.path.dirname(self.data.filename))
+            os.rmdir(os.path.dirname(self.rows.filename))
+            os.rmdir(os.path.dirname(self.cols.filename))
+        except OSError:
+            pass
+
+def build_dna_sparse_frequency_memmap(file_name,
+                                      unsigned int word_len,
+                                      unsigned int start=0,
+                                      unsigned int step=1,
+                                      getdesc=True,
+                                      masked=True,
+                                      dir=".",
+                                      memmap_nnz=10000000000,
+                                      slice_nnz =  100000000):
+    cdef int nbr_cols = 0
+    cdef int this_slice_nbr = 0
+    cdef int next_slice_nbr
+    cdef unsigned long this_nnz = 0
+    cdef unsigned long next_nnz
+    size_list = []
+    desc_list = []
+    ends_list = []
+    data = np.memmap(os.path.join(mkdtemp(dir=dir), "datmap.dat"),
+                     mode="w+",
+                     shape=(memmap_nnz),
+                     dtype=np.uint32)
+    rows = np.memmap(os.path.join(mkdtemp(dir=dir), "rowmap.dat"),
+                     mode="w+",
+                     shape=(memmap_nnz),
+                     dtype=np.intc)
+    cols = np.memmap(os.path.join(mkdtemp(dir=dir), "colmap.dat"),
+                     mode="w+",
+                     shape=(memmap_nnz),
+                     dtype=np.intc)
+    for frequency, nbr_words, description in gen_dna_frequency(
+            file_name,
+            word_len,
+            start=start,
+            step=step,
+            getdesc=getdesc,
+            masked=masked):
+        size_list.append(nbr_words)
+        if getdesc:
+            desc_list.append(description)
+        next_nnz = this_nnz + frequency.nnz
+        if next_nnz > memmap_nnz:
+            print "build_dna_sparse_frequency_memmap failed"
+            return None
+        next_slice_nbr = next_nnz // slice_nnz
+        if next_slice_nbr != this_slice_nbr:
+            ends_list.append(slice_end(this_nnz, nbr_cols))
+            this_slice_nbr = next_slice_nbr
+        data[this_nnz:next_nnz] = frequency.data
+        rows[this_nnz:next_nnz] = frequency.row
+        cols[this_nnz:next_nnz] = nbr_cols
+        this_nnz = next_nnz
+        nbr_cols += 1
+    ends_list.append(slice_end(this_nnz, nbr_cols))
+    shape = (frequency.shape[0], nbr_cols)
+    return sparse_matrix_memmap(data, rows, cols, shape,ends_list), size_list, desc_list
+
+def multiply(lhs, rhs):
+    """
+    Multiply the transpose of matrix lhs on the right by matrix rhs.
+    """
+    try:
+        return np.asarray((lhs.T * rhs).todense())
+    except ValueError:
+        data_filename = rhs.data.filename
+        data_dtype = rhs.data.dtype
+        rows_filename = rhs.rows.filename
+        rows_dtype = rhs.rows.dtype
+        cols_filename = rhs.cols.filename
+        cols_dtype = rhs.cols.dtype
+        nbr_rows = rhs.shape[0]
+        nbr_cols = rhs.shape[1]
+        nbr_result_rows = lhs.shape[1]
+        result = np.zeros((nbr_result_rows, nbr_cols), dtype=np.uint64)
+        nnz_beg = 0
+        col_beg = 0
+        for this_slice_end in rhs.ends_list:
+            nnz_end = this_slice_end.nnz
+            col_end = this_slice_end.nbr_cols
+            nnz = nnz_end - nnz_beg
+
+            data = np.memmap(data_filename,
+                             mode='r',
+                             shape=(nnz),
+                             dtype=data_dtype,
+                             offset=nnz_beg * data_dtype.itemsize)
+            rows = np.memmap(rows_filename,
+                             mode='r',
+                             shape=(nnz),
+                             dtype=rows_dtype,
+                             offset=nnz_beg * rows_dtype.itemsize)
+            cols = np.memmap(cols_filename,
+                             mode='r',
+                             shape=(nnz),
+                             dtype=cols_dtype,
+                             offset=nnz_beg * cols_dtype.itemsize)
+            shape = (nbr_rows, col_end - col_beg)
+
+            sparseslice=ss.csr_matrix((data,(rows,cols - col_beg)), shape=shape)
+            result[:, col_beg : col_end] = (lhs.T * sparseslice).todense()
+            nnz_beg = nnz_end
+            col_beg = col_end
+        return result

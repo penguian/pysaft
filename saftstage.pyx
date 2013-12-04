@@ -33,8 +33,7 @@ def calculate_d2_statistic(inp_freq, dat_freq):
     """
     Calculate d2 statistic.
     """
-    d2_vals = np.asarray((inp_freq.T * dat_freq).todense())[0]
-    return d2_vals
+    return saftsparse.multiply(inp_freq, dat_freq)
 
 def calculate_means_vars(args,
                          context,

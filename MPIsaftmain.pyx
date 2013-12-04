@@ -121,6 +121,9 @@ cdef unsigned int nbr_inp_words
 cdef unsigned int nbr_dat_words
 
 if my_rank != 0:
+
+    context = saftstats.stats_context(args.wordsize, alpha_freq)
+
     if args.timing and my_rank == 1:
         d2_time = 0
         mv_time = 0
@@ -141,7 +144,7 @@ if my_rank != 0:
         if args.timing and my_rank == 1:
             tick = time()
 
-        d2_vals = saftstage.calculate_d2_statistic(inp_freq, dat_freq)
+        d2_vals = saftstage.calculate_d2_statistic(inp_freq, dat_freq)[0,:]
 
         if args.timing and my_rank == 1:
             d2_time += time() - tick
@@ -151,7 +154,6 @@ if my_rank != 0:
         if args.timing and my_rank == 1:
             tick = time()
 
-        context = saftstats.stats_context(args.wordsize, alpha_freq)
         d2_means, d2_vars = saftstage.calculate_means_vars(
             args,
             context,
